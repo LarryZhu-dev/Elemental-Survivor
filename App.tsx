@@ -1,8 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine';
 import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
-import { getRandomCard, STAT_CARDS, COLORS } from './constants';
+import { getRandomCard, ALL_CARDS } from './constants';
 import Muuri from 'muuri';
+
+// Extend window for gm
+declare global {
+    interface Window {
+        gm: () => void;
+    }
+}
 
 const App = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -14,10 +21,17 @@ const App = () => {
   const [bossWarning, setBossWarning] = useState<string | null>(null);
   const [aimStatus, setAimStatus] = useState<string>("自动");
   const [selectedCard, setSelectedCard] = useState<CardDef | null>(null);
+  const [isGmMode, setIsGmMode] = useState(false);
   
   // Muuri Grid Ref
   const gridRef = useRef<Muuri | null>(null);
   const gridElementRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+     window.gm = () => {
+         setIsGmMode(prev => !prev);
+     };
+  }, []);
 
   // Initialize Engine
   useEffect(() => {
@@ -128,9 +142,31 @@ const App = () => {
   };
 
   const selectCardForInventory = (card: CardDef) => {
-    engineRef.current?.addCard(card);
-    engineRef.current?.resume();
-    setGameState(GameState.PLAYING);
+    // Clone to ensure unique ID if added from GM mode multiple times
+    const newCard = { ...card, id: Math.random().toString(36).substr(2, 9) };
+    engineRef.current?.addCard(newCard);
+    
+    if (gameState === GameState.LEVEL_UP) {
+        engineRef.current?.resume();
+        setGameState(GameState.PLAYING);
+    } else {
+        // GM Mode update stats immediately
+        if (engineRef.current) {
+           setStats({ ...engineRef.current.stats });
+        }
+    }
+  };
+
+  const gmRemoveCard = (index: number) => {
+      engineRef.current?.debugRemoveCard(index);
+      if (engineRef.current) setStats({ ...engineRef.current.stats });
+  };
+
+  const gmSetWave = (e: any) => {
+      const w = parseInt(e.target.value);
+      if (!isNaN(w)) {
+          engineRef.current?.debugSetWave(w);
+      }
   };
 
   const handleResume = () => {
@@ -156,17 +192,13 @@ const App = () => {
       const affected = new Set<number>();
       const sources = new Set<number>();
       
-      // Mimic Engine Logic
-      // 1. Separate aging from new effects to handle single-stack correctly in visualization
       let activeEffects: { logic: string, count: number, sourceIndex: number }[] = [];
       
       stats.inventory.forEach((card, index) => {
-          // Check if this card is affected by anything currently active
           if (activeEffects.length > 0) {
               affected.add(index);
           }
 
-          // Determine current repetition (for stacking effect cards)
           let executionCount = 1;
           activeEffects.forEach(eff => {
               if (eff.logic === 'double') executionCount *= 2;
@@ -176,7 +208,6 @@ const App = () => {
 
           if (card.type === CardType.EFFECT && card.effectConfig) {
              sources.add(index);
-             // Logic stacking
              for(let i=0; i<executionCount; i++) {
                  newEffects.push({
                      logic: card.effectConfig.logic,
@@ -186,12 +217,13 @@ const App = () => {
              }
           }
 
-          // Age existing effects. 
-          // New effects added THIS iteration do not age yet (they apply to next card)
-          activeEffects.forEach(eff => eff.count--);
+          const isArtifact = card.type === CardType.ARTIFACT;
+          activeEffects.forEach(eff => {
+               if (eff.logic === 'double') eff.count--;
+               else if (isArtifact) eff.count--;
+          });
           activeEffects = activeEffects.filter(eff => eff.count > 0);
           
-          // Add new
           activeEffects.push(...newEffects);
       });
       return { affected, sources };
@@ -245,7 +277,8 @@ const App = () => {
           <div className="instructions mt-8 text-center">
             点击地面移动. 默认自动攻击最近敌人.<br/>
             按 [A] 键切换手动/自动瞄准.<br/>
-            Esc 暂停/整理背包.
+            Esc 暂停/整理背包.<br/>
+            (在控制台输入 gm() 开启调试模式)
           </div>
         </div>
       )}
@@ -290,6 +323,43 @@ const App = () => {
              </div>
            </div>
         </div>
+      )}
+
+      {/* --- GM PANEL --- */}
+      {isGmMode && (
+          <div className="gm-panel z-100">
+              <div className="gm-header flex justify-between">
+                  <span>GM DEBUG PANEL</span>
+                  <button className="btn-sm" onClick={() => setIsGmMode(false)}>X</button>
+              </div>
+              
+              <div className="gm-section">
+                  <div className="gm-label">Current Wave</div>
+                  <input type="number" className="bg-gray-700 text-white p-1" onChange={gmSetWave} defaultValue={engineRef.current?.wave} />
+              </div>
+
+              <div className="gm-section">
+                  <div className="gm-label">Add Card (Click to Add)</div>
+                  <div className="gm-card-grid">
+                      {ALL_CARDS.map(c => (
+                          <button key={c.id} className="gm-card-btn" onClick={() => selectCardForInventory(c)}>
+                              {c.name}
+                          </button>
+                      ))}
+                  </div>
+              </div>
+
+              <div className="gm-section">
+                  <div className="gm-label">Current Inventory (Click to Remove)</div>
+                  <div className="gm-card-grid">
+                      {stats?.inventory.map((c, i) => (
+                          <button key={c.id} className="gm-card-btn btn-red" onClick={() => gmRemoveCard(i)}>
+                              {i+1}. {c.name}
+                          </button>
+                      ))}
+                  </div>
+              </div>
+          </div>
       )}
 
       {/* --- BOSS WARNING --- */}

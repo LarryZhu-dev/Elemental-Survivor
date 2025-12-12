@@ -33,7 +33,7 @@ export const ARTIFACT_CARDS: CardDef[] = [
   { 
     id: 'art_fire', name: '火葫芦', description: '向前方扇形喷射火焰', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#ff4500', 
-    artifactConfig: { cooldown: 10, baseDamage: 2, element: ElementType.FIRE, projectileType: 'area', color: 0xff4500 }
+    artifactConfig: { cooldown: 10, baseDamage: 3, element: ElementType.FIRE, projectileType: 'area', color: 0xff4500 }
   },
   { 
     id: 'art_wind', name: '风囊', description: '强力吹飞敌人', 
@@ -48,7 +48,7 @@ export const ARTIFACT_CARDS: CardDef[] = [
   { 
     id: 'art_pull', name: '碧玉瑶光如意', description: '全屏彩光，吸附经验', 
     type: CardType.ARTIFACT, rarity: Rarity.PRISMATIC, iconColor: '#ff00ff', 
-    artifactConfig: { cooldown: 300, baseDamage: 0, element: ElementType.PHYSICAL, projectileType: 'area', color: 0xff00ff }
+    artifactConfig: { cooldown: 600, baseDamage: 0, element: ElementType.PHYSICAL, projectileType: 'area', color: 0xff00ff }
   },
   { 
     id: 'art_sword_orbit', name: '九天玄女剑', description: '永久存在的守护仙剑', 
@@ -56,9 +56,9 @@ export const ARTIFACT_CARDS: CardDef[] = [
     artifactConfig: { cooldown: 60, baseDamage: 10, element: ElementType.PHYSICAL, projectileType: 'orbit', color: 0xffffff }
   },
   { 
-    id: 'art_track', name: '三尖两刃刀', description: '神兵自动索敌攻击', 
+    id: 'art_track', name: '三尖两刃刀', description: '显化二郎真君神兵，自动斩妖除魔', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#dddddd', 
-    artifactConfig: { cooldown: 30, baseDamage: 8, element: ElementType.PHYSICAL, projectileType: 'projectile', color: 0xcccccc }
+    artifactConfig: { cooldown: 30, baseDamage: 20, element: ElementType.PHYSICAL, projectileType: 'minion', color: 0xcccccc }
   },
   { 
     id: 'art_nuke', name: '断魔雄剑', description: '随机位置天降巨剑', 

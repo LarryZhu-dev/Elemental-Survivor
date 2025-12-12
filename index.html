@@ -28,12 +28,16 @@
       .h-screen { height: 100vh; }
       .flex { display: flex; }
       .flex-col { flex-direction: column; }
+      .flex-wrap { flex-wrap: wrap; }
       .items-center { align-items: center; }
       .justify-center { justify-content: center; }
+      .justify-between { justify-content: space-between; }
       .text-center { text-align: center; }
       .pointer-events-none { pointer-events: none; }
+      .pointer-events-auto { pointer-events: auto; }
       .z-40 { z-index: 40; }
       .z-50 { z-index: 50; }
+      .z-100 { z-index: 100; }
       .hidden { display: none; }
       .block { display: block; }
       
@@ -61,6 +65,7 @@
       .mb-4 { margin-bottom: 1rem; }
       .mb-2 { margin-bottom: 0.5rem; }
       .mt-8 { margin-top: 2rem; }
+      .mt-4 { margin-top: 1rem; }
       .mt-auto { margin-top: auto; }
       .p-4 { padding: 1rem; }
       .p-8 { padding: 2rem; }
@@ -87,6 +92,10 @@
       .btn:hover { background-color: #4b5563; /* gray-600 */ }
       .btn-fixed { border-color: white; }
       .btn-infinite { border-color: #a855f7; /* purple-500 */ }
+      .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; border-width: 2px; }
+      .btn-red { background-color: #991b1b; border-color: #ef4444; }
+      .btn-red:hover { background-color: #b91c1c; }
+      
       .instructions {
         color: #9ca3af; /* gray-400 */
         font-size: 0.875rem; /* sm */
@@ -444,6 +453,61 @@
         font-size: 1rem;
         cursor: pointer;
         color: black;
+      }
+
+      /* GM Debug Panel */
+      .gm-panel {
+        position: absolute;
+        top: 2rem;
+        left: 2rem;
+        width: 600px;
+        max-height: 80vh;
+        background-color: rgba(0, 0, 0, 0.95);
+        border: 2px solid #a855f7;
+        color: white;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+      }
+      .gm-header {
+        font-size: 1.25rem;
+        font-weight: bold;
+        color: #a855f7;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid #555;
+        padding-bottom: 0.5rem;
+      }
+      .gm-section {
+        margin-bottom: 1rem;
+      }
+      .gm-label {
+        font-size: 0.875rem;
+        color: #9ca3af;
+        margin-bottom: 0.5rem;
+      }
+      .gm-card-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      .gm-card-btn {
+        background-color: #334155;
+        border: 1px solid #475569;
+        color: white;
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        cursor: pointer;
+        text-align: left;
+        width: 140px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .gm-card-btn:hover {
+        background-color: #475569;
+        border-color: white;
       }
 
       /* Custom Scrollbar for Inventory */

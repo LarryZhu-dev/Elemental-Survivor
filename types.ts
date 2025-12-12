@@ -51,7 +51,7 @@ export interface CardDef {
     cooldown: number;
     baseDamage: number;
     element: ElementType;
-    projectileType: 'projectile' | 'beam' | 'area' | 'orbit' | 'lightning' | 'stream';
+    projectileType: 'projectile' | 'beam' | 'area' | 'orbit' | 'lightning' | 'stream' | 'minion';
     color: number;
   };
   buffConfig?: {

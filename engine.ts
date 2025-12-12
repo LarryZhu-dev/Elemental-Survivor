@@ -43,9 +43,10 @@ type Bullet = Container & {
     color: number; // For particle trails
     
     // Persistent Weapon State
-    state?: string; // For Glaive: 'IDLE', 'SEEK', 'RETURN'
+    state?: string; // 'IDLE', 'SEEK', 'RETURN', 'ATTACK'
     target?: Entity | null;
     orbitAngle?: number;
+    attackTimer?: number; // For minion attack cooldown
     
     // Logic modifiers
     isWobble?: boolean;
@@ -65,6 +66,21 @@ type XPOrb = Graphics & {
     vx: number;
     vy: number;
     isMagnetized?: boolean;
+}
+
+// Managed Text system to avoid Ticker overload
+interface FloatingText {
+    container: Text;
+    x: number;
+    y: number;
+    life: number;
+    velocityY: number;
+}
+
+interface TemporaryEffect {
+    container: Graphics;
+    life: number;
+    onUpdate: (g: Graphics, life: number) => void;
 }
 
 interface DelayedAction {
@@ -96,6 +112,10 @@ export class GameEngine {
     xpOrbs: XPOrb[] = [];
     obstacles: Graphics[] = []; 
     generatedChunks: Set<string> = new Set();
+    
+    // Managed Visuals
+    floatingTexts: FloatingText[] = [];
+    tempEffects: TemporaryEffect[] = [];
 
     // Game Logic
     stats: PlayerStats;
@@ -158,7 +178,6 @@ export class GameEngine {
             inventory: []
         };
 
-        // Add initial weapon
         this.addInitialWeapon();
         
         // Placeholders to satisfy TS, real init in init()
@@ -173,7 +192,7 @@ export class GameEngine {
             height: SCREEN_HEIGHT,
             backgroundColor: 0x1a1a2e,
             antialias: false,
-            resolution: window.devicePixelRatio || 1,
+            resolution: Math.min(window.devicePixelRatio, 2), // Limit resolution for perf
         });
 
         // Init Containers
@@ -198,7 +217,6 @@ export class GameEngine {
     }
 
     addInitialWeapon() {
-        // Initial generic projectile
         const starter: CardDef = {
             id: 'starter',
             name: '初始法球',
@@ -285,7 +303,6 @@ export class GameEngine {
     }
 
     generateChunk(cx: number, cy: number) {
-        // Custom fast seeded random function for consistency
         let seed = (cx * 374761393) ^ (cy * 668265263);
         const seededRandom = () => {
             seed = (seed ^ 61) ^ (seed >> 16);
@@ -296,7 +313,7 @@ export class GameEngine {
             return (seed >>> 0) / 4294967296;
         };
 
-        const count = 10; // Obstacles per chunk
+        const count = 10; 
         for(let i=0; i<count; i++) {
              const obs = new Graphics();
              const type = seededRandom();
@@ -304,15 +321,12 @@ export class GameEngine {
              const oy = (cy * CHUNK_SIZE) + seededRandom() * CHUNK_SIZE;
 
              if (type < 0.3) {
-                 // Pixel Tree
-                 obs.rect(-4, 0, 8, 12).fill(0x5c4033); // Trunk
-                 obs.rect(-12, -24, 24, 24).fill(0x228b22); // Leaves
+                 obs.rect(-4, 0, 8, 12).fill(0x5c4033); 
+                 obs.rect(-12, -24, 24, 24).fill(0x228b22); 
              } else if (type < 0.6) {
-                 // Pixel Rock
                  obs.rect(-10, -5, 20, 10).fill(0x555555);
                  obs.rect(-5, -10, 10, 5).fill(0x777777);
              } else {
-                 // Wall Segment
                  obs.rect(-10, -30, 20, 60).fill(0x8b4513);
              }
              
@@ -321,7 +335,6 @@ export class GameEngine {
              
              this.obstacles.push(obs);
              this.world.addChild(obs);
-             // Keep z-index lower
              obs.zIndex = 5;
         }
     }
@@ -350,28 +363,30 @@ export class GameEngine {
     handleMouseDown = (e: MouseEvent) => {
         if (this.state !== GameState.PLAYING) return;
         
-        // Click to move logic
         const worldX = (e.clientX - SCREEN_WIDTH/2) + this.player.x;
         const worldY = (e.clientY - SCREEN_HEIGHT/2) + this.player.y;
         
         this.player.moveTarget = { x: worldX, y: worldY };
         
-        // Spawn indicator
         const marker = new Graphics();
         marker.rect(-2, -2, 4, 4).fill(0xffffff);
         marker.x = worldX;
         marker.y = worldY;
         this.world.addChild(marker);
-        setTimeout(() => {
-            marker.parent?.removeChild(marker);
-            marker.destroy(); // Memory Fix
-        }, 300);
+        
+        this.tempEffects.push({
+            container: marker,
+            life: 15,
+            onUpdate: (g, l) => { g.alpha = l / 15; }
+        });
     }
 
     update(ticker: Ticker) {
         const delta = ticker.deltaTime;
         
         this.updateParticles(delta);
+        this.updateFloatingTexts(delta);
+        this.updateTempEffects(delta);
 
         if (this.state === GameState.PRE_LEVEL_UP) {
             this.preLevelUpTimer -= delta;
@@ -401,7 +416,6 @@ export class GameEngine {
         
         this.gameTime += delta;
 
-        // Map
         if (Math.floor(this.gameTime) % 60 === 0) {
             this.updateMapChunks();
         }
@@ -450,7 +464,6 @@ export class GameEngine {
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             if (dist > 5) {
-                // Reduced speed to 80% (4) as requested
                 const speed = 4 * delta; 
                 this.player.x += (dx / dist) * speed;
                 this.player.y += (dy / dist) * speed;
@@ -518,16 +531,12 @@ export class GameEngine {
                 g.rect(-6, -6, 12, 12).fill(0x10b981);
                 g.rect(-4, -4, 2, 2).fill(0x000000); 
                 g.rect(2, -4, 2, 2).fill(0x000000); 
-                g.rect(-8, -2, 2, 4).fill(0x059669); 
-                g.rect(6, -2, 2, 4).fill(0x059669); 
             } else if (type === 1) {
                 g.rect(-6, -4, 12, 8).fill(0x06b6d4);
                 g.rect(-5, -6, 10, 2).fill(0x06b6d4); 
-                g.rect(-2, -2, 2, 2).fill(0xffffff); 
             } else {
                 g.rect(-4, -4, 8, 8).fill(0x8b5cf6);
                 g.rect(-8, -6, 4, 4).fill(0x6d28d9); 
-                g.rect(4, -6, 4, 4).fill(0x6d28d9); 
             }
         }
 
@@ -556,11 +565,10 @@ export class GameEngine {
         this.world.addChild(cont);
     }
 
-    // --- RECURSIVE LOGIC SYSTEM ---
+    // --- WEAPON SYSTEM ---
     weaponCooldowns: { [key: string]: number } = {};
 
     handleWeapons(delta: number) {
-        // Active effects stack
         let activeEffects: ActiveEffect[] = [];
         let buffStats = { rangeMult: 1, speedMult: 1, freqMult: 1 };
         
@@ -582,9 +590,6 @@ export class GameEngine {
             const newEffects: ActiveEffect[] = [];
 
             if (card.type === CardType.EFFECT && card.effectConfig) {
-                // An Effect card "Executes" by adding its effect to the active stack.
-                // If executionCount > 1, it adds its effect multiple times.
-                
                 for(let i=0; i<executionCount; i++) {
                      newEffects.push({
                          logic: card.effectConfig.logic,
@@ -593,53 +598,39 @@ export class GameEngine {
                 }
             } 
             else if (card.type === CardType.ARTIFACT && card.artifactConfig) {
-                // Handle Cooldown
                 if (!this.weaponCooldowns[card.id]) this.weaponCooldowns[card.id] = 0;
                 this.weaponCooldowns[card.id] -= delta * buffStats.freqMult;
 
-                // Persistent weapons logic check
-                if (card.artifactConfig.projectileType === 'orbit' || (card.id.includes('art_track') && card.artifactConfig.projectileType !== 'beam')) {
+                const isPersistent = card.artifactConfig.projectileType === 'orbit' || card.artifactConfig.projectileType === 'minion';
+                
+                if (isPersistent) {
                     this.fireArtifact(card, activeEffects, buffStats, 0);
                 } 
                 else if (this.weaponCooldowns[card.id] <= 0) {
-                    // Standard trigger
                     for(let i=0; i<executionCount; i++) {
                          if (i === 0) {
                              this.fireArtifact(card, activeEffects, buffStats, i);
                          } else {
-                             // Stagger subsequent triggers more visibly
-                             // Use a closure to capture the current state of effects
                              const capturedEffects = [...activeEffects.map(e => ({...e}))]; 
                              this.delayedActions.push({
-                                 timer: i * 8, // 8 frames delay per double
+                                 timer: i * 8, 
                                  action: () => this.fireArtifact(card, capturedEffects, buffStats, i)
                              });
                          }
                     }
-
                     this.weaponCooldowns[card.id] = card.artifactConfig.cooldown;
                 }
             }
 
-            // Aging Logic (Decrement Counts)
-            // Fix: Logic modifiers (Double) must decrement on EFFECTS (to prevent infinite multiplication of modifiers).
-            // Spatial modifiers (Split, Fan) should ONLY decrement on ARTIFACTS (so they pass through intermediate effects).
-            
             const isArtifact = card.type === CardType.ARTIFACT;
-            
             activeEffects.forEach(eff => {
                 if (eff.logic === 'double') {
-                    // Logic modifiers are consumed by everything that isn't a Buff/Stat
                     eff.count--;
                 } else if (isArtifact) {
-                    // Spatial modifiers are only consumed by Weapons
                     eff.count--;
                 }
             });
-
             activeEffects = activeEffects.filter(eff => eff.count > 0);
-            
-            // Add new effects for the next iteration
             activeEffects.push(...newEffects);
         }
     }
@@ -650,63 +641,32 @@ export class GameEngine {
 
         // --- Jade Ruyi (Pull) Special Logic ---
         if (card.id.startsWith('art_pull')) {
-             // 1. Visual Effect: Full screen rainbow flash
              const flash = new Graphics();
-             // Simple rainbow gradient approx using stacked rects with multiply/add
              flash.rect(0,0, SCREEN_WIDTH, SCREEN_HEIGHT).fill({color: 0xff00ff, alpha: 0.1});
-             flash.rect(0,0, SCREEN_WIDTH, SCREEN_HEIGHT).fill({color: 0x00ffff, alpha: 0.1});
-             flash.rect(0,0, SCREEN_WIDTH, SCREEN_HEIGHT).fill({color: 0xffff00, alpha: 0.1});
-             
-             // Flash white center
-             const cx = SCREEN_WIDTH/2;
-             const cy = SCREEN_HEIGHT/2;
-             flash.circle(cx, cy, 1000).fill({color: 0xffffff, alpha: 0.2});
              flash.blendMode = 'add';
+             this.world.addChild(flash);
              
-             this.app.stage.addChild(flash);
-             
-             // Animate Flash fade out
-             let alpha = 0.5;
-             const fade = (ticker: Ticker) => {
-                 alpha -= 0.02;
-                 flash.alpha = alpha;
-                 if (alpha <= 0) {
-                     this.app.ticker.remove(fade);
-                     flash.parent?.removeChild(flash);
-                     flash.destroy(); // Memory Fix
-                 }
-             };
-             this.app.ticker.add(fade);
+             this.tempEffects.push({
+                 container: flash,
+                 life: 50,
+                 onUpdate: (g, life) => { g.alpha = (life/50) * 0.3; }
+             });
 
-             // 2. Logic: Magnetize all XP
              let count = 0;
              this.xpOrbs.forEach(orb => {
                  orb.isMagnetized = true;
                  count++;
              });
-             
              if (count > 0) this.spawnText("ABSORB!", this.player.x, this.player.y - 40, 0xff00ff);
-             
-             return; // Do not spawn a bullet
+             return; 
         }
 
-        // Persistent Weapon Logic: Orbit Sword
-        // Fix for Double Cast: We simply check if we have enough instances.
-        if (conf.projectileType === 'orbit') {
+        // Persistent Weapon Checks
+        if (conf.projectileType === 'orbit' || conf.projectileType === 'minion') {
             const activeInstances = this.bullets.filter(b => b.ownerId === card.id && !b.isDead).length;
-            // Allow duplicates logic: If dupeIndex is 1, and we have < 2 swords, spawn one.
-            // Simplified: If activeInstances <= dupeIndex, spawn.
             if (activeInstances > dupeIndex) return;
         }
 
-        // Persistent Weapon Logic: Tracking Glaive
-        // Fix for Double Cast: Allow multiple glaives
-        if (card.id.startsWith('art_track')) {
-             const activeInstances = this.bullets.filter(b => b.ownerId === card.id && !b.isDead).length;
-             if (activeInstances > dupeIndex) return;
-        }
-
-        // Aggregate Logic Modifiers
         let isFan = false;
         let isRing = false;
         let isBack = false;
@@ -723,32 +683,25 @@ export class GameEngine {
             if (m.logic === 'giant') giant = true;
         });
         
-        // Pass Logic flags to buffs object to keep createBullet clean, or just use boolean args
         const flags = { track, wobble, giant };
 
         // --- Lightning Instant Logic ---
         if (conf.element === ElementType.LIGHTNING) {
-            // Find targets
-            const range = 250 * buffs.rangeMult;
+            const range = 350 * buffs.rangeMult;
             let currentSource = { x: this.player.x, y: this.player.y };
             let potentialTargets = this.enemies.filter(e => {
                 const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
                 return d < range && !e.isDead;
             });
-            
-            // Sort by distance to player
             potentialTargets.sort((a,b) => Math.hypot(a.x-this.player.x, a.y-this.player.y) - Math.hypot(b.x-this.player.x, b.y-this.player.y));
 
-            // Chain logic
-            let chains = 1 + (isFan ? 2 : 0) + (isRing ? 4 : 0);
+            let chains = 2 + (isFan ? 2 : 0) + (isRing ? 4 : 0);
             if (isBack) chains += 1;
             
-            // Limit targets
             const targetsHit: Entity[] = [];
             
             for(let i=0; i<chains; i++) {
                 if (potentialTargets.length === 0) break;
-                // Pick closest to current source
                 let closestIdx = -1;
                 let minD = 9999;
                 
@@ -761,18 +714,11 @@ export class GameEngine {
                 if (closestIdx !== -1) {
                     const target = potentialTargets[closestIdx];
                     targetsHit.push(target);
-                    // Draw Lightning
                     this.drawLightning(currentSource.x, currentSource.y, target.x, target.y);
-                    
-                    // Update source for next chain
                     currentSource = { x: target.x, y: target.y };
-                    
-                    // Remove from potential
                     potentialTargets.splice(closestIdx, 1);
                 }
             }
-            
-            // Deal Damage
             targetsHit.forEach(e => {
                  const dmg = conf.baseDamage * this.stats.damageMultiplier * (giant ? 1.5 : 1);
                  e.hp -= dmg;
@@ -780,35 +726,35 @@ export class GameEngine {
                  this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffff00);
                  if (e.hp <= 0) this.killEnemy(e);
             });
-
-            return; // Done, no bullet spawned
+            return; 
         }
 
-        // Aiming Logic for projectiles
+        // Projectile Angles
         let baseAngle = 0;
         let targetEnemy = null;
         
         if (this.isAutoAim) {
-            // Find nearest
             let minD = 99999;
             this.enemies.forEach(e => {
                 const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
                 if (d < minD) { minD = d; targetEnemy = e; }
             });
-            
             if (targetEnemy) {
                 baseAngle = Math.atan2(targetEnemy.y - this.player.y, targetEnemy.x - this.player.x);
             } else {
-                // No enemy, aim forward (mouse)
                 const dx = this.mouse.x - (SCREEN_WIDTH / 2);
                 const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
                 baseAngle = Math.atan2(dy, dx);
             }
         } else {
-            // Manual Aim
             const dx = this.mouse.x - (SCREEN_WIDTH / 2);
             const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
             baseAngle = Math.atan2(dy, dx);
+        }
+
+        // Fire Gourd Special: Fan Area
+        if (card.id.startsWith('art_fire')) {
+             isFan = true; // Force fan
         }
 
         let projectileCount = 1;
@@ -820,14 +766,12 @@ export class GameEngine {
         if (isRing) {
             for(let i=0; i<projectileCount; i++) angles.push(baseAngle + (Math.PI * 2 * i / projectileCount));
         } else if (isFan) {
-            for(let i=0; i<projectileCount; i++) angles.push(baseAngle + (i - 2) * 0.3);
+            for(let i=0; i<projectileCount; i++) angles.push(baseAngle + (i - 2) * 0.2);
         } else {
             angles.push(baseAngle);
         }
 
         if (isBack) {
-            // Fix: Add backshots for ALL existing angles (e.g. Fan + Back = 5 forward, 5 back)
-            // Need to copy array first to avoid infinite loop
             const currentAngles = [...angles];
             currentAngles.forEach(a => angles.push(a + Math.PI)); 
         }
@@ -840,51 +784,29 @@ export class GameEngine {
     drawLightning(x1: number, y1: number, x2: number, y2: number) {
         const g = new Graphics();
         const dist = Math.hypot(x2-x1, y2-y1);
-        const steps = Math.floor(dist / 10);
+        const steps = Math.max(2, Math.floor(dist / 20));
         
         g.moveTo(x1, y1);
-        let currX = x1;
-        let currY = y1;
         
         for(let i=1; i<steps; i++) {
             const t = i / steps;
             const targetX = x1 + (x2-x1)*t;
             const targetY = y1 + (y2-y1)*t;
-            const jitter = 10;
+            const jitter = 15;
             const px = targetX + (Math.random()-0.5)*jitter;
             const py = targetY + (Math.random()-0.5)*jitter;
             g.lineTo(px, py);
-            currX = px; currY = py;
         }
         g.lineTo(x2, y2);
-        
         g.stroke({ width: 3, color: 0xffff00, alpha: 1 });
-        g.stroke({ width: 1, color: 0xffffff, alpha: 0.8 });
-        
-        // Add Glow effect via multiple strokes or blend mode
-        // Simple way: Add another wider, lower alpha line
-        const glow = new Graphics();
-        glow.moveTo(x1, y1);
-        glow.lineTo(x2, y2); // Simplified glow path
-        glow.stroke({ width: 10, color: 0xffaa00, alpha: 0.3 });
-        glow.blendMode = 'add';
 
-        this.world.addChild(glow);
         this.world.addChild(g);
         
-        // Fade out
-        const fade = (ticker: Ticker) => {
-            g.alpha -= 0.1;
-            glow.alpha -= 0.1;
-            if (g.alpha <= 0) {
-                this.app.ticker.remove(fade);
-                g.parent?.removeChild(g);
-                glow.parent?.removeChild(glow);
-                g.destroy(); // Memory Fix
-                glow.destroy();
-            }
-        }
-        this.app.ticker.add(fade);
+        this.tempEffects.push({
+            container: g,
+            life: 8,
+            onUpdate: (gfx, life) => { gfx.alpha = life/8; }
+        });
     }
 
     createBullet(conf: any, angle: number, buffs: any, flags: {track: boolean, wobble: boolean, giant: boolean}, ownerId: string, dupeIndex: number) {
@@ -896,101 +818,91 @@ export class GameEngine {
         let radius = 12;
         let isPersistent = false;
         
-        if (flags.giant) {
-            b.scale.set(1.5);
-        }
+        if (flags.giant) b.scale.set(1.5);
 
         if (conf.element === ElementType.WIND) {
-             // Wind Shockwave Visual
              const r = 80 * buffs.rangeMult;
              radius = r;
-             
-             // Distortion Ring
-             g.circle(0,0, r).stroke({ width: 6, color: 0xffffff, alpha: 0.8 });
-             g.circle(0,0, r * 0.8).stroke({ width: 2, color: 0xa5f3fc, alpha: 0.4 });
-             
-             // Particles inside
-             for(let i=0; i<5; i++) {
-                 g.circle((Math.random()-0.5)*r, (Math.random()-0.5)*r, 2).fill(0xffffff);
-             }
-
-             g.blendMode = 'add';
-             life = 30; // Short duration
-             speed = 0; 
+             // Improved Shockwave
+             g.circle(0,0, r).stroke({ width: 4, color: 0xffffff, alpha: 0.8 });
+             g.circle(0,0, r * 0.7).stroke({ width: 2, color: 0xa5f3fc, alpha: 0.6 });
+             life = 30; 
+             speed = 2; // Moves slightly
              b.scale.set(0.1); 
         } 
         else if (conf.projectileType === 'stream') {
-             // RIVER / STREAM LOGIC
-             // Start small, grows rapidly.
-             const r = 8;
+             // Water Stream
+             const r = 10;
              radius = r;
-             g.circle(0,0, r).fill(conf.color);
-             g.circle(0,0, r * 0.7).fill(0xffffff);
-             
-             speed = 6 * buffs.speedMult;
-             life = 40 * buffs.rangeMult;
-             
-             // Add a tail or distortion
-             b.scale.set(0.2); // Start tiny
-             
-             // Random spread
-             angle += (Math.random() - 0.5) * 0.2;
+             g.rect(0, -r, 40, r*2).fill(conf.color); // Long stream segment
+             g.circle(0, 0, r).fill(0xffffff); // Head
+             speed = 7 * buffs.speedMult;
+             life = 50 * buffs.rangeMult;
+             b.scale.set(0.3); 
+             angle += (Math.random() - 0.5) * 0.1; // Spray
         }
         else if (conf.projectileType === 'orbit') {
-            // PIXEL SWORD
-            // Blade
-            g.rect(-2, -24, 4, 32).fill(0xe2e8f0); // Silver
-            // Hilt
-            g.rect(-6, 8, 12, 4).fill(0xc084fc); // Purple
-            g.rect(-2, 12, 4, 6).fill(0x475569); // Dark handle
-            
-            // Magic trail
-            g.rect(-2, -24, 4, 32).fill({color: 0xffffff, alpha: 0.5});
-            
+            // Sword Orbit
+            g.rect(-2, -24, 4, 32).fill(0xe2e8f0); 
+            g.rect(-6, 8, 12, 4).fill(0xc084fc); 
+            g.rect(-2, 12, 4, 6).fill(0x475569); 
             speed = 0;
             life = 999999;
             isPersistent = true;
-            b.orbitAngle = 0 + (dupeIndex * (Math.PI / 2)); // Offset duplicates
-            b.rotation = Math.PI / 4; // Point outward initially
+            b.orbitAngle = 0 + (dupeIndex * (Math.PI / 2)); 
+            b.rotation = Math.PI / 4; 
         }
-        else if (ownerId.startsWith('art_track')) {
-            // GLAIVE LOGIC
-            // Pole
-            g.rect(-1, -15, 2, 30).fill(0x334155); 
-            // Blade
-            g.bezierCurveTo(0, -15, 8, -25, 0, -35).fill(0x94a3b8);
-            g.bezierCurveTo(0, -35, -5, -25, 0, -15).fill(0x94a3b8);
-            
+        else if (conf.projectileType === 'minion') {
+            // --- San Jian Liang Ren Dao ---
+            // Huge Polearm
+            // Handle
+            g.rect(-2, -20, 4, 60).fill(0x52525b); // Dark gray
+            g.rect(-3, 30, 6, 5).fill(0xd4d4d8); // Pommel
+            // Blade Base
+            g.moveTo(0, -20);
+            g.lineTo(-10, -30);
+            g.lineTo(10, -30);
+            g.fill(0xffd700); // Gold guard
+            // Blades
+            g.beginPath();
+            g.moveTo(0, -30);
+            g.lineTo(-4, -80); // Center tip
+            g.lineTo(4, -80); 
+            g.fill(0xe2e8f0); // Silver
             // Side blades
-            g.moveTo(0, -18);
-            g.lineTo(4, -22);
-            g.stroke({width: 1, color: 0xffffff});
+            g.moveTo(-8, -30);
+            g.quadraticCurveTo(-20, -40, -12, -60);
+            g.lineTo(-8, -30);
+            g.fill(0xe2e8f0);
+            
+            g.moveTo(8, -30);
+            g.quadraticCurveTo(20, -40, 12, -60);
+            g.lineTo(8, -30);
+            g.fill(0xe2e8f0);
 
-            speed = 8;
+            speed = 0;
             life = 999999;
             isPersistent = true;
             b.state = 'IDLE';
-            b.orbitAngle = dupeIndex * (Math.PI); // Offset duplicates
+            b.orbitAngle = dupeIndex * (Math.PI); 
+            b.attackTimer = 0;
+            b.scale.set(1.2);
         }
         else if (conf.projectileType === 'projectile') {
-            g.circle(0,0, 4).fill(0xffffff); 
+            g.circle(0,0, 5).fill(0xffffff); 
             g.circle(0,0, 8).fill({ color: conf.color, alpha: 0.6 }); 
             g.blendMode = 'add';
-        } else if (conf.projectileType === 'beam') {
-            g.rect(0, -5, 40, 10).fill(conf.color);
-            g.blendMode = 'add';
-            speed = 10 * buffs.speedMult;
         } else if (conf.projectileType === 'area') {
+            // Fire Breath
             const r = 100 * buffs.rangeMult;
-            radius = r; // Sync Hitbox with Visuals
+            radius = r; 
             g.moveTo(0,0);
-            g.arc(0,0, r, -0.5, 0.5); 
+            g.arc(0,0, r, -0.4, 0.4); 
             g.lineTo(0,0);
-            g.fill({ color: conf.color, alpha: 0.5 });
-            g.blendMode = 'add';
-            life = 10; 
+            g.fill({ color: conf.color, alpha: 0.4 });
+            life = 15; 
             speed = 0; 
-            if (conf.element === ElementType.FIRE) speed = 3; 
+            b.scale.set(0.5); // Start small expand
         }
         
         b.addChild(g);
@@ -998,8 +910,11 @@ export class GameEngine {
         b.y = this.player.y;
         b.vx = Math.cos(angle) * speed;
         b.vy = Math.sin(angle) * speed;
-        b.rotation = angle;
-        
+        b.rotation = angle + Math.PI/2; // Orient graphics correctly
+        if (conf.projectileType === 'projectile' || conf.projectileType === 'stream') b.rotation = angle;
+        if (conf.projectileType === 'area') b.rotation = angle;
+        if (conf.element === ElementType.WIND) b.rotation = 0;
+
         b.damage = conf.baseDamage * this.stats.damageMultiplier * (flags.giant ? 1.5 : 1);
         b.element = conf.element;
         b.duration = life;
@@ -1010,7 +925,6 @@ export class GameEngine {
         b.isWobble = flags.wobble;
         b.wobblePhase = Math.random() * 10;
         b.hitList = new Set();
-        // Persistent weapons have infinite pierce usually, or controlled by logic
         b.pierce = (conf.projectileType === 'area' || isPersistent || conf.element === ElementType.WIND || conf.projectileType === 'stream') ? 999 : 1;
         b.color = conf.color;
         b.trailTimer = 0;
@@ -1032,24 +946,37 @@ export class GameEngine {
                 e.tint = 0xffffff;
             }
 
-            // Normal Movement
             const dx = playerPos.x - e.x;
             const dy = playerPos.y - e.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             let moveSpeed = (1 + (this.wave * 0.005)) * delta;
             
-            // Physics: Knockback Decay
-            e.knockbackVx *= 0.9;
-            e.knockbackVy *= 0.9;
+            e.knockbackVx *= 0.85; // Faster decay
+            e.knockbackVy *= 0.85;
 
-            // Apply movement + knockback
             if (dist > 10) {
-                e.x += (dx / dist) * moveSpeed;
-                e.y += (dy / dist) * moveSpeed;
+                // Soft collision with other enemies to prevent stacking
+                let pushX = 0, pushY = 0;
+                // Optimization: Only check a few random neighbors or use grid? 
+                // For < 50 enemies simple iteration is ok
+                if (this.enemies.length < 50) {
+                    this.enemies.forEach(other => {
+                        if (e === other) return;
+                        const idx = e.x - other.x;
+                        const idy = e.y - other.y;
+                        const idist = Math.sqrt(idx*idx + idy*idy);
+                        if (idist < (e.radius + other.radius)) {
+                            pushX += idx / idist;
+                            pushY += idy / idist;
+                        }
+                    });
+                }
+                
+                e.x += (dx / dist) * moveSpeed + pushX * 0.5;
+                e.y += (dy / dist) * moveSpeed + pushY * 0.5;
             }
             
-            // Apply Knockback velocity
             e.x += e.knockbackVx * delta;
             e.y += e.knockbackVy * delta;
 
@@ -1068,21 +995,20 @@ export class GameEngine {
         this.bullets.forEach(b => {
             if (b.isDead) return;
             
-            // --- Wind Expansion ---
+            // --- Visual Expansions ---
             if (b.element === ElementType.WIND) {
                 b.scale.x += 0.05 * delta;
                 b.scale.y += 0.05 * delta;
                 b.alpha -= 0.03 * delta;
-                if (b.alpha <= 0) {
-                    b.isDead = true;
-                    b.parent?.removeChild(b);
-                    b.destroy({ children: true }); // Memory Fix
-                }
+                if (b.alpha <= 0) this.killBullet(b);
                 b.duration -= delta;
-                return; // Custom logic done, skip standard movement
+                return; 
             }
-
-            // --- Stream Expansion (Water) ---
+            if (b.element === ElementType.FIRE && b.radius > 50) {
+                 b.scale.x += 0.05 * delta;
+                 b.scale.y += 0.05 * delta;
+                 b.alpha -= 0.05 * delta;
+            }
             if (b.element === ElementType.WATER && b.scale.x < 3) {
                  b.scale.x += 0.1 * delta;
                  b.scale.y += 0.1 * delta;
@@ -1090,96 +1016,113 @@ export class GameEngine {
             }
 
             b.duration -= delta;
-            
             if (b.duration <= 0 || b.alpha <= 0) {
-                b.isDead = true;
-                b.parent?.removeChild(b);
-                b.destroy({ children: true }); // Memory Fix
+                this.killBullet(b);
                 return;
             }
 
+            // --- Trails ---
             if (b.vx !== 0 || b.vy !== 0) {
                 b.trailTimer -= delta;
                 if (b.trailTimer <= 0) {
-                    // Don't spawn trails for invisible orbiters or large areas
                     if (!b.ownerId.startsWith('art_sword') && !b.ownerId.startsWith('art_track')) {
-                       // Lower particle count for stream to save perf
                        if (b.element !== ElementType.WATER || Math.random() > 0.7) {
-                          this.spawnParticle(b.x, b.y, b.color, 1);
+                          // Simple trail
+                          const p = new Graphics();
+                          p.rect(0,0, 4, 4).fill(b.color);
+                          p.x = b.x; p.y = b.y;
+                          this.world.addChild(p);
+                          this.tempEffects.push({
+                              container: p, life: 15, onUpdate: (g,l) => { g.alpha = l/15; g.rotation += 0.1; }
+                          });
                        }
                     }
                     b.trailTimer = 3; 
                 }
             }
 
-            // --- Persistent Weapons Logic ---
-            if (b.ownerId.includes('art_sword_orbit')) { 
+            // --- Minion Logic (San Jian Liang Ren Dao) ---
+            if (b.ownerId.startsWith('art_track')) {
+                // Minion Behavior
+                if (!b.state) b.state = 'IDLE';
+                if (!b.attackTimer) b.attackTimer = 0;
+
+                if (b.state === 'IDLE') {
+                    // Hover near player
+                    if (b.orbitAngle === undefined) b.orbitAngle = 0;
+                    b.orbitAngle += 0.02 * delta; // Slow orbit
+                    const targetX = this.player.x + Math.cos(b.orbitAngle) * 50;
+                    const targetY = this.player.y + Math.sin(b.orbitAngle) * 50 - 30;
+                    
+                    b.x += (targetX - b.x) * 0.1 * delta;
+                    b.y += (targetY - b.y) * 0.1 * delta;
+                    b.rotation = 0; // Upright
+
+                    if (b.attackTimer > 0) b.attackTimer -= delta;
+                    else {
+                        // Find Target
+                        let closest = null;
+                        let minD = 500; 
+                        for(const e of this.enemies) {
+                            const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
+                            if(d < minD) { minD = d; closest = e; }
+                        }
+                        if (closest) {
+                            b.state = 'ATTACK';
+                            b.target = closest;
+                        }
+                    }
+                }
+                else if (b.state === 'ATTACK') {
+                     if (!b.target || b.target.isDead) {
+                         b.state = 'IDLE';
+                         return;
+                     }
+                     const dx = b.target.x - b.x;
+                     const dy = b.target.y - b.y;
+                     const dist = Math.hypot(dx, dy);
+                     
+                     if (dist > 20) {
+                         b.x += (dx/dist) * 15 * delta; // Dash
+                         b.y += (dy/dist) * 15 * delta;
+                         b.rotation = Math.atan2(dy, dx) + Math.PI/2;
+                     } else {
+                         // Hit
+                         b.state = 'SLASH';
+                         b.attackTimer = 15; // Slash duration
+                     }
+                }
+                else if (b.state === 'SLASH') {
+                    b.rotation += 0.5 * delta; // Spin slash
+                    b.attackTimer! -= delta;
+                    // AoE Damage
+                    this.enemies.forEach(e => {
+                        const d = Math.hypot(e.x - b.x, e.y - b.y);
+                        if (d < 50) {
+                            this.applyDamage(e, b); // Will throttle damage via hitList logic usually, but here we want pure DPS
+                        }
+                    });
+
+                    if (b.attackTimer! <= 0) {
+                        b.state = 'IDLE';
+                        b.attackTimer = 20; // Cooldown before next target
+                    }
+                }
+
+                // Reset hitlist occasionally so slash can hit multiple times
+                if (Math.floor(this.gameTime) % 10 === 0) b.hitList.clear();
+            }
+            // --- Orbit Sword ---
+            else if (b.ownerId.includes('art_sword_orbit')) { 
                 if (b.orbitAngle === undefined) b.orbitAngle = 0;
                 b.orbitAngle += 0.05 * delta;
                 b.x = this.player.x + Math.cos(b.orbitAngle) * 100;
                 b.y = this.player.y + Math.sin(b.orbitAngle) * 100;
-                // Rotate sword to point outward
                 b.rotation = b.orbitAngle + Math.PI / 2; 
                 
-                // Clear hitlist periodically so it can hit same enemy again
-                if (Math.floor(this.gameTime) % 30 === 0) {
-                    b.hitList.clear();
-                }
+                if (Math.floor(this.gameTime) % 30 === 0) b.hitList.clear();
             } 
-            else if (b.ownerId.startsWith('art_track')) {
-                // GLAIVE LOGIC
-                // State Machine: IDLE (orbit) -> SEEK (found target) -> RETURN (too far)
-                if (!b.state) b.state = 'IDLE';
-
-                if (b.state === 'IDLE') {
-                    // Orbit slowly near player
-                    if (b.orbitAngle === undefined) b.orbitAngle = 0;
-                    b.orbitAngle -= 0.02 * delta;
-                    const targetX = this.player.x + Math.cos(b.orbitAngle) * 60;
-                    const targetY = this.player.y + Math.sin(b.orbitAngle) * 60;
-                    
-                    // Smooth move
-                    b.x += (targetX - b.x) * 0.1 * delta;
-                    b.y += (targetY - b.y) * 0.1 * delta;
-                    b.rotation += 0.1 * delta;
-
-                    // Look for target
-                    let closest = null;
-                    let minD = 400; // Search range
-                    for(const e of this.enemies) {
-                        const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
-                        if(d < minD) { minD = d; closest = e; }
-                    }
-                    if (closest) {
-                        b.state = 'SEEK';
-                        b.target = closest;
-                    }
-                }
-                else if (b.state === 'SEEK') {
-                    if (!b.target || b.target.isDead) {
-                        b.state = 'IDLE';
-                        b.target = null;
-                    } else {
-                        const angle = Math.atan2(b.target.y - b.y, b.target.x - b.x);
-                        b.vx = Math.cos(angle) * 12; // Fast
-                        b.vy = Math.sin(angle) * 12;
-                        b.x += b.vx * delta;
-                        b.y += b.vy * delta;
-                        b.rotation += 0.5 * delta; // Spin fast
-
-                        const dToPlayer = Math.hypot(b.x - this.player.x, b.y - this.player.y);
-                        if (dToPlayer > 500) {
-                            b.state = 'IDLE'; // Leash
-                        }
-                    }
-                }
-                
-                // Reset Hitlist for continuous damage
-                if (Math.floor(this.gameTime) % 20 === 0) {
-                    b.hitList.clear();
-                }
-            }
-            // --- Standard Tracking ---
+            // --- Standard Projectiles ---
             else if (b.isTracking) {
                 let nearest = null;
                 let minDst = 1000;
@@ -1189,30 +1132,26 @@ export class GameEngine {
                 }
                 if (nearest) {
                     const angle = Math.atan2(nearest.y - b.y, nearest.x - b.x);
-                    b.vx = b.vx * 0.9 + Math.cos(angle) * 1;
-                    b.vy = b.vy * 0.9 + Math.sin(angle) * 1;
+                    // Homing strength
+                    b.vx = b.vx * 0.9 + Math.cos(angle) * 2;
+                    b.vy = b.vy * 0.9 + Math.sin(angle) * 2;
                 }
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
             } else {
-                // --- Wobble Logic ---
                 if (b.isWobble) {
                     if (b.wobblePhase === undefined) b.wobblePhase = 0;
                     b.wobblePhase += 0.2 * delta;
-                    
-                    // Calculate Perpendicular Vector
                     const len = Math.hypot(b.vx, b.vy);
                     if (len > 0) {
                         const px = -b.vy / len;
                         const py = b.vx / len;
                         const offset = Math.sin(b.wobblePhase) * 2 * delta;
-                        
                         b.x += b.vx * delta + px * offset;
                         b.y += b.vy * delta + py * offset;
-                        return; // Handled move
+                        return; 
                     }
                 }
-
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
             }
@@ -1220,8 +1159,15 @@ export class GameEngine {
         this.bullets = this.bullets.filter(b => !b.isDead);
     }
 
+    killBullet(b: Bullet) {
+        b.isDead = true;
+        b.parent?.removeChild(b);
+        b.destroy({ children: true });
+    }
+
     updateParticles(delta: number) {
-        this.particles.forEach(p => {
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+            const p = this.particles[i];
             if (!p.isStatic) {
                 p.x += p.vx * delta;
                 p.y += p.vy * delta;
@@ -1233,10 +1179,40 @@ export class GameEngine {
             
             if (p.life <= 0 || p.alpha <= 0) {
                 p.parent?.removeChild(p);
-                p.destroy(); // Memory Fix
+                p.destroy();
+                this.particles.splice(i, 1);
             }
-        });
-        this.particles = this.particles.filter(p => p.life > 0 && p.alpha > 0);
+        }
+    }
+
+    updateFloatingTexts(delta: number) {
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+            const ft = this.floatingTexts[i];
+            ft.life -= delta;
+            ft.y += ft.velocityY * delta;
+            ft.container.y = ft.y;
+            ft.container.alpha = ft.life / 30; // Fade out
+            
+            if (ft.life <= 0) {
+                ft.container.parent?.removeChild(ft.container);
+                ft.container.destroy();
+                this.floatingTexts.splice(i, 1);
+            }
+        }
+    }
+
+    updateTempEffects(delta: number) {
+        for (let i = this.tempEffects.length - 1; i >= 0; i--) {
+            const ef = this.tempEffects[i];
+            ef.life -= delta;
+            ef.onUpdate(ef.container, ef.life);
+            
+            if (ef.life <= 0) {
+                ef.container.parent?.removeChild(ef.container);
+                ef.container.destroy();
+                this.tempEffects.splice(i, 1);
+            }
+        }
     }
 
     updateXP(delta: number) {
@@ -1245,18 +1221,15 @@ export class GameEngine {
             const dy = this.player.y - orb.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
             
-            // Magnetized logic (Jade Ruyi) or normal range
             if (orb.isMagnetized || dist < this.stats.pickupRange) {
-                // If magnetized, infinite range and faster speed
                 const speed = orb.isMagnetized ? 15 : 8;
-                
                 orb.x += (dx/dist) * speed * delta;
                 orb.y += (dy/dist) * speed * delta;
                 
                 if (dist < 10) {
                     this.stats.xp += orb.value;
                     orb.parent?.removeChild(orb);
-                    orb.destroy(); // Memory Fix
+                    orb.destroy(); 
                     if (this.stats.xp >= this.stats.nextLevelXp) {
                         this.startLevelUpSequence();
                     }
@@ -1289,15 +1262,14 @@ export class GameEngine {
         for (const b of this.bullets) {
             if (b.isDead) continue;
             
-            // Optimization: Grid check or simple AABB before Circle? Circle is fast enough for < 100 enemies.
             for (const e of this.enemies) {
                 if (e.isDead) continue;
                 if (b.hitList.has(this.getObjectId(e))) continue;
 
-                // For wind, checking collision is slightly different (radius based, visual scale matches hitbox)
-                // b.radius is updated in create, but wind scales.
                 let hitRadius = b.radius;
                 if (b.element === ElementType.WIND || b.element === ElementType.WATER) hitRadius *= b.scale.x; 
+                // Minion hit logic handled inside minion update, but collision safety check:
+                if (b.ownerId.startsWith('art_track') && b.state !== 'SLASH') continue;
 
                 const dx = b.x - e.x;
                 const dy = b.y - e.y;
@@ -1309,9 +1281,7 @@ export class GameEngine {
                     
                     b.pierce--;
                     if (b.pierce <= 0) {
-                        b.isDead = true;
-                        b.parent?.removeChild(b);
-                        b.destroy({ children: true }); // Memory Fix
+                        this.killBullet(b);
                         break; 
                     }
                 }
@@ -1328,46 +1298,22 @@ export class GameEngine {
         let dmg = b.damage;
 
         if (b.element === ElementType.WIND) {
-            // Physics Knockback instead of Teleport
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
-            // Strong push
-            e.knockbackVx += Math.cos(angle) * 10;
-            e.knockbackVy += Math.sin(angle) * 10;
+            e.knockbackVx += Math.cos(angle) * 15;
+            e.knockbackVy += Math.sin(angle) * 15;
         }
 
         if (b.element === ElementType.FIRE) {
             e.isBurning = true;
-            if (e.isWet) { 
-                e.isBurning = false; 
-                this.spawnText("Extinguish", e.x, e.y, 0xaaaaff);
-            }
+            if (e.isWet) { e.isBurning = false; }
         }
 
         if (b.element === ElementType.WATER) {
             e.isWet = true;
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
-            // Medium push
             e.knockbackVx += Math.cos(angle) * 5; 
             e.knockbackVy += Math.sin(angle) * 5;
-            
-            if (e.isBurning) {
-                e.isBurning = false; 
-                dmg *= 0.5; 
-            }
-        }
-
-        // Standard Lightning (not the instant one) - Keep for backward compatibility or other mods
-        if (b.element === ElementType.LIGHTNING) {
-            if (e.isWet) {
-                this.triggerChainLightning(e, dmg);
-                this.spawnText("CHAIN!", e.x, e.y, 0xffff00);
-            }
-            if (e.isBurning) {
-                dmg *= 2; 
-                e.isBurning = false;
-                this.spawnText("EXPLODE!", e.x, e.y, 0xffaa00);
-                this.spawnParticle(e.x, e.y, 0xffaa00, 10);
-            }
+            if (e.isBurning) { e.isBurning = false; dmg *= 0.5; }
         }
 
         if (dmg > 0) {
@@ -1381,34 +1327,13 @@ export class GameEngine {
             }
         }
 
-        this.spawnParticle(e.x, e.y, b.color, 3);
-    }
-
-    triggerChainLightning(source: Entity, dmg: number) {
-        if (this.enemies.length > 200) return; 
-
-        this.enemies.forEach(target => {
-            if (target === source) return;
-            const d = Math.hypot(target.x - source.x, target.y - source.y);
-            if (d < 100) {
-                target.hp -= dmg * 0.5;
-                const g = new Graphics();
-                g.moveTo(source.x, source.y);
-                g.lineTo(target.x, target.y);
-                g.stroke({ width: 2, color: 0xffff00 }); 
-                this.world.addChild(g);
-                setTimeout(() => {
-                    g.parent?.removeChild(g);
-                    g.destroy(); // Memory fix
-                }, 100);
-            }
-        });
+        if (Math.random() > 0.5) this.spawnParticle(e.x, e.y, b.color, 2);
     }
 
     killEnemy(e: Entity) {
         e.isDead = true;
         this.world.removeChild(e);
-        e.destroy({ children: true }); // Memory Fix
+        e.destroy({ children: true }); 
         
         const orb = new Graphics() as XPOrb;
         let color = 0x888888;
@@ -1416,16 +1341,8 @@ export class GameEngine {
         const val = 1 + (this.wave * 0.5);
         
         if (this.wave > 10) { color = 0x00ff00; size = 8; }
-        if (this.wave > 30) { color = 0x00ffff; size = 10; } 
-        if (this.wave > 80) { color = 0xffd700; size = 12; } 
-
-        orb.poly([
-            0, -size,
-            size, 0,
-            0, size,
-            -size, 0
-        ]).fill(color);
-
+        
+        orb.poly([0, -size, size, 0, 0, size, -size, 0]).fill(color);
         orb.x = e.x;
         orb.y = e.y;
         orb.value = val;
@@ -1455,42 +1372,37 @@ export class GameEngine {
     }
 
     spawnText(text: string, x: number, y: number, color: number) {
-        if (this.app.ticker.FPS < 40 && Math.random() > 0.5) return;
+        if (this.floatingTexts.length > 50) return; // Hard limit
 
         const t = new Text({
             text: text,
             style: {
-                fontFamily: 'Courier New', // Faster font
+                fontFamily: 'Courier New', 
                 fontSize: 14,
                 fill: color,
                 stroke: { color: 0x000000, width: 2 },
-                align: 'center',
                 fontWeight: 'bold'
             }
         });
         t.x = x;
         t.y = y;
         this.world.addChild(t);
-        let tick = 0;
-        const anim = (ticker: Ticker) => {
-            tick++;
-            t.y -= 1;
-            t.alpha -= 0.02;
-            if (tick > 50) {
-                this.app.ticker.remove(anim);
-                t.parent?.removeChild(t);
-                t.destroy(); // Memory fix
-            }
-        };
-        this.app.ticker.add(anim);
+        
+        this.floatingTexts.push({
+            container: t,
+            x: x,
+            y: y,
+            life: 40,
+            velocityY: -1
+        });
     }
 
     spawnParticle(x: number, y: number, color: number, count = 3, upward = false) {
-        if (this.app.ticker.FPS < 30) return; 
+        if (this.particles.length > 300) return; 
 
         for(let i=0; i<count; i++) {
             const p = new Graphics() as Particle;
-            p.circle(0,0, 3).fill(color);
+            p.rect(0,0, 3, 3).fill(color); // Rects are faster than circles
             p.x = x;
             p.y = y;
             if (upward) {
@@ -1503,7 +1415,6 @@ export class GameEngine {
             p.life = 30;
             p.maxLife = 30;
             p.isStatic = false;
-            p.blendMode = 'add'; 
             
             this.particles.push(p);
             this.world.addChild(p);
@@ -1515,9 +1426,8 @@ export class GameEngine {
             if (card.statBonus.hpPercent) {
                 const increase = this.stats.maxHp * card.statBonus.hpPercent;
                 this.stats.maxHp += increase;
-                // Correctly update Entity Stats
                 this.player.maxHp = this.stats.maxHp;
-                this.player.hp += increase; // Heal for the amount gained
+                this.player.hp += increase; 
             }
             if (card.statBonus.dmgPercent) this.stats.damageMultiplier *= (1 + card.statBonus.dmgPercent);
             if (card.statBonus.pickupPercent) this.stats.pickupRange *= (1 + card.statBonus.pickupPercent);
@@ -1532,6 +1442,19 @@ export class GameEngine {
 
     resume() {
         this.state = GameState.PLAYING;
+    }
+    
+    // --- GM / DEBUG METHODS ---
+    debugSetWave(w: number) {
+        this.wave = w;
+        this.waveTotalEnemies = Math.floor(10 + this.wave * 2.5);
+        this.spawnText(`GM: WAVE ${w}`, this.player.x, this.player.y - 50, 0xff00ff);
+    }
+    
+    debugRemoveCard(index: number) {
+        if (index >= 0 && index < this.stats.inventory.length) {
+            this.stats.inventory.splice(index, 1);
+        }
     }
 
     destroy() {
