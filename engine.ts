@@ -283,13 +283,13 @@ export class GameEngine {
         this.waveDelayTimer = 0;
 
         // Cleanup any existing entities from previous session
-        this.enemies.forEach(e => { e.destroy({children:true}); });
+        this.enemies.forEach(e => { if(!e.destroyed) e.destroy({children:true}); });
         this.enemies = [];
-        this.bullets.forEach(b => { b.destroy({children:true}); });
+        this.bullets.forEach(b => { if(!b.destroyed) b.destroy({children:true}); });
         this.bullets = [];
-        this.xpOrbs.forEach(x => { x.destroy(); });
+        this.xpOrbs.forEach(x => { if(!x.destroyed) x.destroy(); });
         this.xpOrbs = [];
-        this.obstacles.forEach(o => o.destroy());
+        this.obstacles.forEach(o => { if(!o.destroyed) o.destroy(); });
         this.obstacles = [];
         this.generatedChunks.clear();
 
@@ -732,6 +732,8 @@ export class GameEngine {
                 }
             }
             targetsHit.forEach(e => {
+                 // Check again before applying damage
+                 if (e.isDead || e.destroyed) return;
                  const dmg = conf.baseDamage * this.stats.damageMultiplier * (giant ? 1.5 : 1);
                  e.hp -= dmg;
                  e.isElectrified = true;
@@ -1003,7 +1005,16 @@ export class GameEngine {
             if (e.hp <= 0) this.killEnemy(e);
         });
 
-        this.enemies = this.enemies.filter(e => !e.isDead && !e.destroyed);
+        // Filter AFTER the loop and destroy safely
+        const keep: Entity[] = [];
+        this.enemies.forEach(e => {
+            if (e.isDead) {
+                if(!e.destroyed) e.destroy({ children: true });
+            } else {
+                keep.push(e);
+            }
+        });
+        this.enemies = keep;
     }
 
     updateBullets(delta: number) {
@@ -1091,6 +1102,7 @@ export class GameEngine {
                 }
                 else if (b.state === 'ATTACK') {
                      // CRITICAL FIX: Ensure target is valid before access
+                     // Check isDead AND destroyed. Accessing destroyed properties throws error.
                      if (!b.target || b.target.isDead || b.target.destroyed) {
                          b.state = 'IDLE';
                          b.target = null;
@@ -1176,13 +1188,24 @@ export class GameEngine {
                 b.y += b.vy * delta;
             }
         });
-        this.bullets = this.bullets.filter(b => !b.isDead && !b.destroyed);
+        
+        // Filter and destroy dead bullets safely
+        const keep: Bullet[] = [];
+        this.bullets.forEach(b => {
+             if (b.isDead) {
+                 if (!b.destroyed) b.destroy({children: true});
+             } else {
+                 keep.push(b);
+             }
+        });
+        this.bullets = keep;
     }
 
     killBullet(b: Bullet) {
+        if (b.isDead || b.destroyed) return;
         b.isDead = true;
         b.parent?.removeChild(b);
-        b.destroy({ children: true });
+        // Defer destroy to end of updateBullets
     }
 
     updateParticles(delta: number) {
@@ -1358,7 +1381,7 @@ export class GameEngine {
         if (e.isDead || e.destroyed) return;
         e.isDead = true;
         this.world.removeChild(e);
-        e.destroy({ children: true }); 
+        // Defer destroy to end of updateEnemies to avoid accessing destroyed props in loop
         
         const orb = new Graphics() as XPOrb;
         let color = 0x888888;
