@@ -19,6 +19,8 @@ type Entity = Container & {
     // Player Specific
     invulnTimer: number;
     moveTarget?: {x: number, y: number};
+    // Visuals
+    hitFlashTimer: number;
 }
 
 type Bullet = Container & {
@@ -73,9 +75,14 @@ export class GameEngine {
     // Game Logic
     stats: PlayerStats;
     wave: number = 1;
-    waveTimer: number = 0;
+    waveTimer: number = 0; // Keeping for general time tracking if needed, but not for spawn
     gameTime: number = 0;
     
+    // Wave Logic
+    waveTotalEnemies: number = 0;
+    waveEnemiesSpawned: number = 0;
+    waveDelayTimer: number = 0;
+
     // Input
     mouse: { x: number, y: number } = { x: 0, y: 0 };
     
@@ -166,8 +173,8 @@ export class GameEngine {
             rarity: Rarity.SILVER,
             iconColor: '#00ffff',
             artifactConfig: {
-                cooldown: 60,
-                baseDamage: 2, 
+                cooldown: 50,
+                baseDamage: 4, 
                 element: ElementType.PHYSICAL,
                 projectileType: 'projectile',
                 color: 0x00ffff
@@ -206,6 +213,7 @@ export class GameEngine {
         cont.isDead = false;
         cont.zIndex = 100;
         cont.invulnTimer = 0;
+        cont.hitFlashTimer = 0;
 
         return cont;
     }
@@ -213,6 +221,13 @@ export class GameEngine {
     start(mapType: MapType) {
         this.mapType = mapType;
         this.state = GameState.PLAYING;
+        
+        // Init Wave Data
+        this.wave = 1;
+        this.waveEnemiesSpawned = 0;
+        this.waveTotalEnemies = 15; // Start with manageable amount
+        this.waveDelayTimer = 0;
+
         this.generateMap();
         this.onGameStateChange(GameState.PLAYING);
     }
@@ -285,8 +300,7 @@ export class GameEngine {
         
         const delta = ticker.deltaTime;
         this.gameTime += delta;
-        this.waveTimer += delta;
-
+        
         // --- 1. Player Movement (Click to Move) ---
         this.updatePlayerMovement(delta);
 
@@ -297,7 +311,7 @@ export class GameEngine {
         this.world.position.y = SCREEN_HEIGHT / 2;
 
         // --- 3. Spawning ---
-        this.handleSpawning();
+        this.handleSpawning(delta);
 
         // --- 4. Weapon Firing ---
         this.handleWeapons(delta);
@@ -342,22 +356,45 @@ export class GameEngine {
         }
     }
 
-    handleSpawning() {
-        if (this.waveTimer > 1800) {
-            this.wave++;
-            this.waveTimer = 0;
-            if (this.wave % 10 === 0) {
-                this.onBossWarning(`Level ${this.wave} BOSS`);
-                this.spawnEnemy(true);
+    handleSpawning(delta: number) {
+        // If between waves
+        if (this.waveDelayTimer > 0) {
+            this.waveDelayTimer -= delta;
+            if (this.waveDelayTimer <= 0) {
+                // Start next wave
+                this.wave++;
+                this.waveEnemiesSpawned = 0;
+                this.waveTotalEnemies = Math.floor(10 + this.wave * 2.5); // Linear scaling
+                
+                if (this.wave % 10 === 0) {
+                    this.onBossWarning(`Level ${this.wave} BOSS`);
+                    this.spawnEnemy(true);
+                    this.waveEnemiesSpawned++;
+                } else {
+                    this.spawnText(`WAVE ${this.wave}`, this.player.x, this.player.y - 100, 0xffffff);
+                }
             }
+            return;
         }
-        
-        // Spawn rate cap
-        if (this.enemies.length > 300) return;
 
-        const spawnChance = 0.02 + (this.wave * 0.005);
-        if (Math.random() < spawnChance) {
-            this.spawnEnemy(false);
+        // Check for wave clear
+        if (this.waveEnemiesSpawned >= this.waveTotalEnemies && this.enemies.length === 0) {
+            // Wave Cleared!
+            this.waveDelayTimer = 120; // 2 seconds delay
+            return;
+        }
+
+        // Spawning logic
+        if (this.waveEnemiesSpawned < this.waveTotalEnemies) {
+             // Cap concurrent enemies slightly to prevent lag, but allow most
+             if (this.enemies.length < 50) {
+                 // Spawn rate: Increases slightly with wave
+                 const chance = 0.02 + (this.wave * 0.002);
+                 if (Math.random() < chance) {
+                     this.spawnEnemy(false);
+                     this.waveEnemiesSpawned++;
+                 }
+             }
         }
     }
 
@@ -408,11 +445,13 @@ export class GameEngine {
         cont.y = y;
         
         // Balance: Lower scaling so it doesn't become impossible
-        const hpMultiplier = Math.pow(this.wave, 1.1); 
-        cont.maxHp = isBoss ? 300 * hpMultiplier : (5 + hpMultiplier * 2);
+        // Old: Math.pow(this.wave, 1.1)
+        // New: 5 + wave * 1.5. Linear.
+        const waveHP = 5 + (this.wave * 1.5);
+        cont.maxHp = isBoss ? 300 + (this.wave * 10) : waveHP;
         
         cont.hp = cont.maxHp;
-        cont.radius = isBoss ? 25 : 8;
+        cont.radius = isBoss ? 25 : 10;
         cont.isDead = false;
         cont.vx = 0; 
         cont.vy = 0;
@@ -422,6 +461,7 @@ export class GameEngine {
         cont.isElectrified = false;
         cont.burnTimer = 0;
         cont.wetTimer = 0;
+        cont.hitFlashTimer = 0;
 
         this.enemies.push(cont);
         this.world.addChild(cont);
@@ -519,7 +559,10 @@ export class GameEngine {
         let life = 60 * buffs.rangeMult;
         
         if (conf.projectileType === 'projectile') {
-            g.rect(-3, -3, 6, 6).fill(conf.color); // Pixel projectile
+            // Enhanced visual for basic projectiles
+            g.circle(0,0, 4).fill(0xffffff); // Core
+            g.circle(0,0, 6).fill({ color: conf.color, alpha: 0.5 }); // Glow
+            // Add a small sparkly tail
         } else if (conf.projectileType === 'beam') {
             g.rect(0, -5, 40, 10).fill(conf.color);
             speed = 10 * buffs.speedMult;
@@ -598,6 +641,14 @@ export class GameEngine {
         this.enemies.forEach(e => {
             if (e.isDead) return;
 
+            // Hit Flash Logic
+            if (e.hitFlashTimer > 0) {
+                e.hitFlashTimer -= delta;
+                e.tint = 0xff0000;
+            } else {
+                e.tint = 0xffffff;
+            }
+
             const dx = playerPos.x - e.x;
             const dy = playerPos.y - e.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -633,6 +684,11 @@ export class GameEngine {
                 return;
             }
 
+            // Particle effect for projectiles
+            if ((b.element === ElementType.PHYSICAL || b.element === ElementType.FIRE) && Math.random() < 0.3) {
+                 this.spawnParticle(b.x, b.y, 0xffffaa, 1);
+            }
+
             if (b.ownerId === 'art_sword_orbit') {
                 b.rotation += 0.1 * delta;
                 b.x = this.player.x + Math.cos(b.rotation) * 100;
@@ -640,8 +696,7 @@ export class GameEngine {
             } else if (b.isTracking) {
                 let nearest = null;
                 let minDst = 1000;
-                // Optimized search: only check every few frames or check random subset?
-                // For now, simple check is okay for <100 enemies
+                // Optimized search
                 for (const e of this.enemies) {
                     const d = Math.hypot(e.x - b.x, e.y - b.y);
                     if (d < minDst) { minDst = d; nearest = e; }
@@ -724,8 +779,9 @@ export class GameEngine {
                      this.player.invulnTimer = 30; // 0.5s i-frame
                      this.spawnText("-HP", this.player.x, this.player.y - 30, 0xff0000);
                      if (this.player.hp <= 0) {
+                         this.player.hp = 0;
                          this.state = GameState.GAME_OVER;
-                         // Handle game over logic
+                         this.onGameStateChange(GameState.GAME_OVER);
                      }
                      break; // One hit per frame max
                  }
@@ -768,6 +824,8 @@ export class GameEngine {
 
     applyDamage(e: Entity, b: Bullet) {
         let dmg = b.damage;
+
+        e.hitFlashTimer = 5; // Flash for 5 frames
 
         // --- Wind Knockback ---
         if (b.element === ElementType.WIND) {

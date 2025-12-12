@@ -131,10 +131,10 @@ const App = () => {
            <div className="bar-container bar-hp">
              <div 
                className="bar-fill fill-red" 
-               style={{ width: `${(stats.hp / stats.maxHp) * 100}%` }} 
+               style={{ width: `${Math.max(0, (stats.hp / stats.maxHp) * 100)}%` }} 
              />
              <span className="hp-text">
-                {Math.ceil(stats.hp)} / {Math.ceil(stats.maxHp)}
+                {Math.ceil(Math.max(0, stats.hp))} / {Math.ceil(stats.maxHp)}
              </span>
            </div>
            
@@ -153,8 +153,9 @@ const App = () => {
            <div className="wave-info">
              <div className="wave-title">WAVE {engineRef.current?.wave}</div>
              <div className="wave-timer">
-               {Math.floor((engineRef.current?.gameTime || 0) / 60)}:
-               {Math.floor((engineRef.current?.gameTime || 0) % 60).toString().padStart(2, '0')}
+                Left: {engineRef.current?.waveTotalEnemies && engineRef.current.waveEnemiesSpawned !== undefined 
+                  ? Math.max(0, engineRef.current.waveTotalEnemies - engineRef.current.waveEnemiesSpawned + engineRef.current.enemies.length)
+                  : 0}
              </div>
            </div>
         </div>
@@ -238,6 +239,17 @@ const App = () => {
              继续游戏
            </button>
          </div>
+      )}
+
+      {/* --- GAME OVER --- */}
+      {gameState === GameState.GAME_OVER && (
+          <div className="absolute inset-0 overlay-darker flex flex-col items-center justify-center z-50">
+             <h1 className="text-red-500 text-6xl font-bold mb-4">GAME OVER</h1>
+             <p className="text-white text-xl mb-8">你倒下了...</p>
+             <button onClick={() => window.location.reload()} className="btn btn-fixed">
+               重新开始
+             </button>
+          </div>
       )}
 
       {/* --- VICTORY --- */}
