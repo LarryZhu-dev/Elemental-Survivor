@@ -160,28 +160,32 @@ const App = () => {
 
   // Helper to determine if a slot is affected by previous effect cards
   // This mimics the Engine logic to show UI hints
-  const getAffectedIndices = () => {
-      if (!stats) return new Set<number>();
+  const calculateCardEffects = () => {
+      if (!stats) return { affected: new Set<number>(), sources: new Set<number>() };
       
       const affected = new Set<number>();
-      const activeEffects: { logic: string, count: number }[] = [];
+      const sources = new Set<number>();
+      const activeEffects: { logic: string, count: number, sourceIndex: number }[] = [];
       
       stats.inventory.forEach((card, index) => {
-          let executionCount = 1;
-          activeEffects.forEach(eff => {
-              if (eff.logic === 'double') executionCount *= 2;
-          });
-
           // If this card is being influenced, mark it
           if (activeEffects.length > 0) {
               affected.add(index);
           }
 
+          // Determine Repetition Count based on active 'double' effects
+          let executionCount = 1;
+          activeEffects.forEach(eff => {
+              if (eff.logic === 'double') executionCount *= 2;
+          });
+
           if (card.type === CardType.EFFECT && card.effectConfig) {
+             sources.add(index);
              for(let i=0; i<executionCount; i++) {
                  activeEffects.push({
                      logic: card.effectConfig.logic,
-                     count: card.effectConfig.influenceCount
+                     count: card.effectConfig.influenceCount,
+                     sourceIndex: index
                  });
              }
           }
@@ -192,31 +196,36 @@ const App = () => {
               if (activeEffects[i].count <= 0) activeEffects.splice(i, 1);
           }
       });
-      return affected;
+      return { affected, sources };
   };
 
-  const affectedIndices = getAffectedIndices();
+  const { affected, sources } = calculateCardEffects();
 
   const renderInventory = () => {
       if (!stats) return null;
 
-      return stats.inventory.map((card, index) => (
-          <div
-             key={card.id}
-             data-id={card.id}
-             className={`inv-slot rarity-${card.rarity} ${affectedIndices.has(index) ? 'is-affected' : ''}`}
-             onClick={() => setSelectedCard(card)}
-           >
-             <div className="inv-slot-content w-full h-full flex items-center justify-center relative pointer-events-none">
-                 {card.type === CardType.EFFECT && <span className="badge badge-effect">E</span>}
-                 {card.type === CardType.BUFF && <span className="badge badge-buff">B</span>}
-                 
-                 <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
-                    {card.name.substring(0, 2)}
-                 </span>
-             </div>
-           </div>
-      ));
+      return stats.inventory.map((card, index) => {
+          const isAffected = affected.has(index);
+          const isSource = sources.has(index);
+
+          return (
+            <div
+                key={card.id}
+                data-id={card.id}
+                className={`inv-slot rarity-${card.rarity} ${isAffected ? 'is-affected' : ''} ${isSource ? 'is-effect-source' : ''}`}
+                onClick={() => setSelectedCard(card)}
+            >
+                <div className="inv-slot-content w-full h-full flex items-center justify-center relative pointer-events-none">
+                    {card.type === CardType.EFFECT && <span className="badge badge-effect">E</span>}
+                    {card.type === CardType.BUFF && <span className="badge badge-buff">B</span>}
+                    
+                    <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
+                        {card.name.substring(0, 2)}
+                    </span>
+                </div>
+            </div>
+          );
+      });
   }
 
   return (
@@ -323,7 +332,7 @@ const App = () => {
            <h2 className="pause-title mb-4">暂停 / 装备调整</h2>
            <p className="pause-desc mb-8">
              拖动卡片调整顺序。效果卡片(Effect)会影响排列在它后面的卡片。<br/>
-             虚线框表示该卡片受到前方效果的影响。
+             青色发光为效果源，虚线框内为受影响卡片。
            </p>
            
            <div className="pause-layout">

@@ -36,9 +36,9 @@ export const ARTIFACT_CARDS: CardDef[] = [
     artifactConfig: { cooldown: 10, baseDamage: 2, element: ElementType.FIRE, projectileType: 'area', color: 0xff4500 }
   },
   { 
-    id: 'art_wind', name: '风囊', description: '吹飞敌人，无伤害，增强火势', 
+    id: 'art_wind', name: '风囊', description: '强力吹飞敌人 (CD较长)', 
     type: CardType.ARTIFACT, rarity: Rarity.SILVER, iconColor: '#88ff88', 
-    artifactConfig: { cooldown: 30, baseDamage: 0, element: ElementType.WIND, projectileType: 'area', color: 0xccffcc }
+    artifactConfig: { cooldown: 120, baseDamage: 0, element: ElementType.WIND, projectileType: 'area', color: 0xccffcc }
   },
   { 
     id: 'art_water', name: '白玉神盂', description: '喷射水流击退敌人，扑灭火焰', 
@@ -51,12 +51,12 @@ export const ARTIFACT_CARDS: CardDef[] = [
     artifactConfig: { cooldown: 300, baseDamage: 0, element: ElementType.PHYSICAL, projectileType: 'area', color: 0xff00ff }
   },
   { 
-    id: 'art_sword_orbit', name: '九天玄女剑', description: '环绕自身的飞剑', 
+    id: 'art_sword_orbit', name: '九天玄女剑', description: '永久存在的守护仙剑', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#ffffff', 
     artifactConfig: { cooldown: 60, baseDamage: 10, element: ElementType.PHYSICAL, projectileType: 'orbit', color: 0xffffff }
   },
   { 
-    id: 'art_track', name: '三尖两刃刀', description: '自动追踪敌人', 
+    id: 'art_track', name: '三尖两刃刀', description: '神兵自动索敌攻击', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#dddddd', 
     artifactConfig: { cooldown: 30, baseDamage: 8, element: ElementType.PHYSICAL, projectileType: 'projectile', color: 0xcccccc }
   },
@@ -66,17 +66,17 @@ export const ARTIFACT_CARDS: CardDef[] = [
     artifactConfig: { cooldown: 120, baseDamage: 50, element: ElementType.PHYSICAL, projectileType: 'area', color: 0x000000 }
   },
   { 
-    id: 'art_light', name: '闪电神镜', description: '连锁闪电攻击', 
+    id: 'art_light', name: '闪电神镜', description: '瞬发连锁闪电', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#ffff00', 
-    artifactConfig: { cooldown: 50, baseDamage: 12, element: ElementType.LIGHTNING, projectileType: 'lightning', color: 0xffff00 }
+    artifactConfig: { cooldown: 50, baseDamage: 25, element: ElementType.LIGHTNING, projectileType: 'lightning', color: 0xffff00 }
   },
   { 
-    id: 'art_light_combo', name: '雷公楔', description: '配合雷公锤造成强力闪电', 
+    id: 'art_light_combo', name: '雷公楔', description: '瞬发强力连锁闪电', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#cccc00', 
-    artifactConfig: { cooldown: 45, baseDamage: 15, element: ElementType.LIGHTNING, projectileType: 'lightning', color: 0xffd700 }
+    artifactConfig: { cooldown: 45, baseDamage: 30, element: ElementType.LIGHTNING, projectileType: 'lightning', color: 0xffd700 }
   },
   { 
-    id: 'art_hammer', name: '雷公锤', description: '仅用于配合雷公楔', 
+    id: 'art_hammer', name: '雷公锤', description: '增加雷公楔的威力和范围', 
     type: CardType.ARTIFACT, rarity: Rarity.SILVER, iconColor: '#a9a9a9', 
     artifactConfig: { cooldown: 9999, baseDamage: 0, element: ElementType.PHYSICAL, projectileType: 'projectile', color: 0x808080 }
   },

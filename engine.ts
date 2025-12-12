@@ -39,6 +39,11 @@ type Bullet = Container & {
     // Visuals
     trailTimer: number; // For spawning particle trails
     color: number; // For particle trails
+    
+    // Persistent Weapon State
+    state?: string; // For Glaive: 'IDLE', 'SEEK', 'RETURN'
+    target?: Entity | null;
+    orbitAngle?: number;
 }
 
 type Particle = Graphics & {
@@ -271,17 +276,6 @@ export class GameEngine {
     }
 
     generateChunk(cx: number, cy: number) {
-        // Deterministic seeding based on coords
-        // Simple hash: dot product with primes
-        const seedBase = cx * 73856093 ^ cy * 19349663;
-        
-        const random = () => {
-             const t = Math.sin(seedBase + Math.random()) * 10000; // Use simple math.random for now but seeded would be better. 
-             // To be truly deterministic with Math.sin, we need a custom seed not Math.random.
-             // For this task, "all map has them" is the key. 
-             return Math.random(); 
-        };
-
         // Custom fast seeded random function for consistency
         let seed = (cx * 374761393) ^ (cy * 668265263);
         const seededRandom = () => {
@@ -593,13 +587,14 @@ export class GameEngine {
                 if (!this.weaponCooldowns[card.id]) this.weaponCooldowns[card.id] = 0;
                 this.weaponCooldowns[card.id] -= delta * buffStats.freqMult;
 
-                if (this.weaponCooldowns[card.id] <= 0) {
-                    // Execute Weapon logic N times
-                    // Note: If executionCount is high (e.g. 4), we trigger the artifact 4 times instantly.
-                    // For performance and visual clarity, we might stagger them slightly or just fire all.
-                    // The original implementation used delayedActions for 'double'. 
-                    // Let's use a loop with small delay offsets for clarity.
-                    
+                // Special handling for persistent weapons (Sword, Glaive)
+                // They trigger once to spawn, then the cooldown might be used for special moves or respawning.
+                // For this game, we just check existence every frame for them.
+                if (card.artifactConfig.projectileType === 'orbit' || (card.id.includes('art_track') && card.artifactConfig.projectileType !== 'beam')) {
+                    this.fireArtifact(card, activeEffects, buffStats);
+                } 
+                else if (this.weaponCooldowns[card.id] <= 0) {
+                    // Standard trigger
                     for(let i=0; i<executionCount; i++) {
                          if (i === 0) {
                              this.fireArtifact(card, activeEffects, buffStats);
@@ -627,9 +622,19 @@ export class GameEngine {
         if (!card.artifactConfig) return;
         const conf = card.artifactConfig;
 
+        // Persistent Weapon Logic: Orbit Sword
         if (conf.projectileType === 'orbit') {
             const alreadyActive = this.bullets.some(b => b.ownerId === card.id && !b.isDead);
-            if (alreadyActive) return; 
+            if (alreadyActive) return; // Only spawn one
+            // Else spawn it below
+        }
+
+        // Persistent Weapon Logic: Tracking Glaive
+        // Note: art_track uses 'projectile' in config for backward compat, but we override logic by ID or add new type
+        // Let's rely on ID check for the specific 'art_track' behavior requested
+        if (card.id.startsWith('art_track')) {
+             const alreadyActive = this.bullets.some(b => b.ownerId === card.id && !b.isDead);
+             if (alreadyActive) return;
         }
 
         // Aggregate Logic Modifiers
@@ -638,8 +643,6 @@ export class GameEngine {
         let isBack = false;
         let track = false;
         
-        // Use set to avoid redundant booleans but multiple 'split_back' could mean quad? 
-        // For simplicity, boolean flags.
         activeEffects.forEach(m => {
             if (m.logic === 'split_back') isBack = true;
             if (m.logic === 'fan') isFan = true;
@@ -647,7 +650,65 @@ export class GameEngine {
             if (m.logic === 'track') track = true;
         });
 
-        // Aiming Logic
+        // --- Lightning Instant Logic ---
+        if (conf.element === ElementType.LIGHTNING) {
+            // Find targets
+            const range = 250 * buffs.rangeMult;
+            let currentSource = { x: this.player.x, y: this.player.y };
+            let potentialTargets = this.enemies.filter(e => {
+                const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
+                return d < range && !e.isDead;
+            });
+            
+            // Sort by distance to player
+            potentialTargets.sort((a,b) => Math.hypot(a.x-this.player.x, a.y-this.player.y) - Math.hypot(b.x-this.player.x, b.y-this.player.y));
+
+            // Chain logic
+            let chains = 1 + (isFan ? 2 : 0) + (isRing ? 4 : 0);
+            if (isBack) chains += 1;
+            
+            // Limit targets
+            const targetsHit: Entity[] = [];
+            
+            for(let i=0; i<chains; i++) {
+                if (potentialTargets.length === 0) break;
+                // Pick closest to current source
+                let closestIdx = -1;
+                let minD = 9999;
+                
+                for(let j=0; j<potentialTargets.length; j++) {
+                     const t = potentialTargets[j];
+                     const d = Math.hypot(t.x - currentSource.x, t.y - currentSource.y);
+                     if (d < minD) { minD = d; closestIdx = j; }
+                }
+
+                if (closestIdx !== -1) {
+                    const target = potentialTargets[closestIdx];
+                    targetsHit.push(target);
+                    // Draw Lightning
+                    this.drawLightning(currentSource.x, currentSource.y, target.x, target.y);
+                    
+                    // Update source for next chain
+                    currentSource = { x: target.x, y: target.y };
+                    
+                    // Remove from potential
+                    potentialTargets.splice(closestIdx, 1);
+                }
+            }
+            
+            // Deal Damage
+            targetsHit.forEach(e => {
+                 const dmg = conf.baseDamage * this.stats.damageMultiplier;
+                 e.hp -= dmg;
+                 e.isElectrified = true;
+                 this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffff00);
+                 if (e.hp <= 0) this.killEnemy(e);
+            });
+
+            return; // Done, no bullet spawned
+        }
+
+        // Aiming Logic for projectiles
         let baseAngle = 0;
         let targetEnemy = null;
         
@@ -699,6 +760,54 @@ export class GameEngine {
         });
     }
 
+    drawLightning(x1: number, y1: number, x2: number, y2: number) {
+        const g = new Graphics();
+        const dist = Math.hypot(x2-x1, y2-y1);
+        const steps = Math.floor(dist / 10);
+        
+        g.moveTo(x1, y1);
+        let currX = x1;
+        let currY = y1;
+        
+        for(let i=1; i<steps; i++) {
+            const t = i / steps;
+            const targetX = x1 + (x2-x1)*t;
+            const targetY = y1 + (y2-y1)*t;
+            const jitter = 10;
+            const px = targetX + (Math.random()-0.5)*jitter;
+            const py = targetY + (Math.random()-0.5)*jitter;
+            g.lineTo(px, py);
+            currX = px; currY = py;
+        }
+        g.lineTo(x2, y2);
+        
+        g.stroke({ width: 3, color: 0xffff00, alpha: 1 });
+        g.stroke({ width: 1, color: 0xffffff, alpha: 0.8 });
+        
+        // Add Glow effect via multiple strokes or blend mode
+        // Simple way: Add another wider, lower alpha line
+        const glow = new Graphics();
+        glow.moveTo(x1, y1);
+        glow.lineTo(x2, y2); // Simplified glow path
+        glow.stroke({ width: 10, color: 0xffaa00, alpha: 0.3 });
+        glow.blendMode = 'add';
+
+        this.world.addChild(glow);
+        this.world.addChild(g);
+        
+        // Fade out
+        const fade = (ticker: Ticker) => {
+            g.alpha -= 0.1;
+            glow.alpha -= 0.1;
+            if (g.alpha <= 0) {
+                this.app.ticker.remove(fade);
+                g.parent?.removeChild(g);
+                glow.parent?.removeChild(glow);
+            }
+        }
+        this.app.ticker.add(fade);
+    }
+
     createBullet(conf: any, angle: number, buffs: any, tracking: boolean, ownerId: string) {
         const b = new Container() as Bullet;
         const g = new Graphics();
@@ -706,8 +815,66 @@ export class GameEngine {
         let speed = 5 * buffs.speedMult;
         let life = 180 * buffs.rangeMult; 
         let radius = 12;
+        let isPersistent = false;
 
-        if (conf.projectileType === 'projectile') {
+        if (conf.element === ElementType.WIND) {
+             // Wind Shockwave Visual
+             const r = 80 * buffs.rangeMult;
+             radius = r;
+             
+             // Distortion Ring
+             g.circle(0,0, r).stroke({ width: 6, color: 0xffffff, alpha: 0.8 });
+             g.circle(0,0, r * 0.8).stroke({ width: 2, color: 0xa5f3fc, alpha: 0.4 });
+             
+             // Particles inside
+             for(let i=0; i<5; i++) {
+                 g.circle((Math.random()-0.5)*r, (Math.random()-0.5)*r, 2).fill(0xffffff);
+             }
+
+             g.blendMode = 'add';
+             life = 30; // Short duration
+             speed = 0; // Moves with player or stationary? Wind bag usually pushes away from player
+             // Actually let's make it expand.
+             
+             // We'll animate scale in updateBullets
+             b.scale.set(0.1); 
+        } 
+        else if (conf.projectileType === 'orbit') {
+            // PIXEL SWORD
+            // Blade
+            g.rect(-2, -24, 4, 32).fill(0xe2e8f0); // Silver
+            // Hilt
+            g.rect(-6, 8, 12, 4).fill(0xc084fc); // Purple
+            g.rect(-2, 12, 4, 6).fill(0x475569); // Dark handle
+            
+            // Magic trail
+            g.rect(-2, -24, 4, 32).fill({color: 0xffffff, alpha: 0.5});
+            
+            speed = 0;
+            life = 999999;
+            isPersistent = true;
+            b.orbitAngle = 0;
+            b.rotation = Math.PI / 4; // Point outward initially
+        }
+        else if (ownerId.startsWith('art_track')) {
+            // PIXEL GLAIVE
+            // Pole
+            g.rect(-1, -15, 2, 30).fill(0x334155); 
+            // Blade
+            g.bezierCurveTo(0, -15, 8, -25, 0, -35).fill(0x94a3b8);
+            g.bezierCurveTo(0, -35, -5, -25, 0, -15).fill(0x94a3b8);
+            
+            // Side blades
+            g.moveTo(0, -18);
+            g.lineTo(4, -22);
+            g.stroke({width: 1, color: 0xffffff});
+
+            speed = 8;
+            life = 999999;
+            isPersistent = true;
+            b.state = 'IDLE';
+        }
+        else if (conf.projectileType === 'projectile') {
             g.circle(0,0, 4).fill(0xffffff); 
             g.circle(0,0, 8).fill({ color: conf.color, alpha: 0.6 }); 
             g.blendMode = 'add';
@@ -718,28 +885,14 @@ export class GameEngine {
         } else if (conf.projectileType === 'area') {
             const r = 100 * buffs.rangeMult;
             radius = r; // Sync Hitbox with Visuals
-            
-            if (conf.element === ElementType.WIND) {
-                g.arc(0,0, r, -0.5, 0.5).stroke({width: 2, color: 0xccffcc, alpha: 0.5});
-                g.arc(0,0, r*0.7, -0.2, 0.8).stroke({width: 2, color: 0xffffff, alpha: 0.3});
-            } else {
-                g.moveTo(0,0);
-                g.arc(0,0, r, -0.5, 0.5); 
-                g.lineTo(0,0);
-                g.fill({ color: conf.color, alpha: 0.5 });
-            }
+            g.moveTo(0,0);
+            g.arc(0,0, r, -0.5, 0.5); 
+            g.lineTo(0,0);
+            g.fill({ color: conf.color, alpha: 0.5 });
             g.blendMode = 'add';
             life = 10; 
             speed = 0; 
             if (conf.element === ElementType.FIRE) speed = 3; 
-            if (conf.element === ElementType.WIND) speed = 3;
-        } else if (conf.projectileType === 'orbit') {
-            g.rect(-5, -20, 10, 40).fill(conf.color); 
-            speed = 0;
-            life = 9999; 
-        } else if (conf.projectileType === 'lightning') {
-            speed = 0;
-            life = 5;
         }
         
         b.addChild(g);
@@ -757,7 +910,8 @@ export class GameEngine {
         b.isDead = false;
         b.isTracking = tracking;
         b.hitList = new Set();
-        b.pierce = (conf.projectileType === 'area' || conf.projectileType === 'orbit') ? 999 : 1;
+        // Persistent weapons have infinite pierce usually, or controlled by logic
+        b.pierce = (conf.projectileType === 'area' || isPersistent || conf.element === ElementType.WIND) ? 999 : 1;
         b.color = conf.color;
         b.trailTimer = 0;
 
@@ -802,6 +956,23 @@ export class GameEngine {
     updateBullets(delta: number) {
         this.bullets.forEach(b => {
             if (b.isDead) return;
+            
+            // --- Wind Expansion ---
+            if (b.element === ElementType.WIND) {
+                b.scale.x += 0.05 * delta;
+                b.scale.y += 0.05 * delta;
+                b.alpha -= 0.03 * delta;
+                if (b.alpha <= 0) {
+                    b.isDead = true;
+                    b.parent?.removeChild(b);
+                }
+                // Wind stays on player? Or moves out? 
+                // "Blow enemies away". Moving center is good.
+                // Keep existing physics.
+                b.duration -= delta;
+                return; // Custom logic done, skip standard movement
+            }
+
             b.duration -= delta;
             
             if (b.duration <= 0) {
@@ -813,16 +984,83 @@ export class GameEngine {
             if (b.vx !== 0 || b.vy !== 0) {
                 b.trailTimer -= delta;
                 if (b.trailTimer <= 0) {
-                    this.spawnParticle(b.x, b.y, b.color, 1);
+                    // Don't spawn trails for invisible orbiters or large areas
+                    if (!b.ownerId.startsWith('art_sword') && !b.ownerId.startsWith('art_track')) {
+                       this.spawnParticle(b.x, b.y, b.color, 1);
+                    }
                     b.trailTimer = 3; 
                 }
             }
 
+            // --- Persistent Weapons Logic ---
             if (b.ownerId.includes('art_sword_orbit')) { 
-                b.rotation += 0.1 * delta;
-                b.x = this.player.x + Math.cos(b.rotation) * 100;
-                b.y = this.player.y + Math.sin(b.rotation) * 100;
-            } else if (b.isTracking) {
+                if (b.orbitAngle === undefined) b.orbitAngle = 0;
+                b.orbitAngle += 0.05 * delta;
+                b.x = this.player.x + Math.cos(b.orbitAngle) * 100;
+                b.y = this.player.y + Math.sin(b.orbitAngle) * 100;
+                // Rotate sword to point outward
+                b.rotation = b.orbitAngle + Math.PI / 2; 
+                
+                // Clear hitlist periodically so it can hit same enemy again
+                if (Math.floor(this.gameTime) % 30 === 0) {
+                    b.hitList.clear();
+                }
+            } 
+            else if (b.ownerId.startsWith('art_track')) {
+                // GLAIVE LOGIC
+                // State Machine: IDLE (orbit) -> SEEK (found target) -> RETURN (too far)
+                if (!b.state) b.state = 'IDLE';
+
+                if (b.state === 'IDLE') {
+                    // Orbit slowly near player
+                    if (b.orbitAngle === undefined) b.orbitAngle = 0;
+                    b.orbitAngle -= 0.02 * delta;
+                    const targetX = this.player.x + Math.cos(b.orbitAngle) * 60;
+                    const targetY = this.player.y + Math.sin(b.orbitAngle) * 60;
+                    
+                    // Smooth move
+                    b.x += (targetX - b.x) * 0.1 * delta;
+                    b.y += (targetY - b.y) * 0.1 * delta;
+                    b.rotation += 0.1 * delta;
+
+                    // Look for target
+                    let closest = null;
+                    let minD = 400; // Search range
+                    for(const e of this.enemies) {
+                        const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
+                        if(d < minD) { minD = d; closest = e; }
+                    }
+                    if (closest) {
+                        b.state = 'SEEK';
+                        b.target = closest;
+                    }
+                }
+                else if (b.state === 'SEEK') {
+                    if (!b.target || b.target.isDead) {
+                        b.state = 'IDLE';
+                        b.target = null;
+                    } else {
+                        const angle = Math.atan2(b.target.y - b.y, b.target.x - b.x);
+                        b.vx = Math.cos(angle) * 12; // Fast
+                        b.vy = Math.sin(angle) * 12;
+                        b.x += b.vx * delta;
+                        b.y += b.vy * delta;
+                        b.rotation += 0.5 * delta; // Spin fast
+
+                        const dToPlayer = Math.hypot(b.x - this.player.x, b.y - this.player.y);
+                        if (dToPlayer > 500) {
+                            b.state = 'IDLE'; // Leash
+                        }
+                    }
+                }
+                
+                // Reset Hitlist for continuous damage
+                if (Math.floor(this.gameTime) % 20 === 0) {
+                    b.hitList.clear();
+                }
+            }
+            // --- Standard Tracking ---
+            else if (b.isTracking) {
                 let nearest = null;
                 let minDst = 1000;
                 for (const e of this.enemies) {
@@ -906,15 +1144,22 @@ export class GameEngine {
 
         for (const b of this.bullets) {
             if (b.isDead) continue;
+            
+            // Optimization: Grid check or simple AABB before Circle? Circle is fast enough for < 100 enemies.
             for (const e of this.enemies) {
                 if (e.isDead) continue;
                 if (b.hitList.has(this.getObjectId(e))) continue;
+
+                // For wind, checking collision is slightly different (radius based, visual scale matches hitbox)
+                // b.radius is updated in create, but wind scales.
+                let hitRadius = b.radius;
+                if (b.element === ElementType.WIND) hitRadius *= b.scale.x; 
 
                 const dx = b.x - e.x;
                 const dy = b.y - e.y;
                 const dist = Math.sqrt(dx*dx + dy*dy);
 
-                if (dist < (b.radius + e.radius)) {
+                if (dist < (hitRadius + e.radius)) {
                     this.applyDamage(e, b);
                     b.hitList.add(this.getObjectId(e));
                     
@@ -940,9 +1185,11 @@ export class GameEngine {
         e.hitFlashTimer = 5; 
 
         if (b.element === ElementType.WIND) {
+            // Massive Knockback
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
-            e.x += Math.cos(angle) * 30; 
-            e.y += Math.sin(angle) * 30;
+            e.x += Math.cos(angle) * 80; // Hard push
+            e.y += Math.sin(angle) * 80;
+            // Wind deals no damage usually, just control
         }
 
         if (b.element === ElementType.FIRE) {
@@ -965,6 +1212,7 @@ export class GameEngine {
             }
         }
 
+        // Standard Lightning (not the instant one) - Keep for backward compatibility or other mods
         if (b.element === ElementType.LIGHTNING) {
             if (e.isWet) {
                 this.triggerChainLightning(e, dmg);
