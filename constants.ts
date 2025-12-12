@@ -38,7 +38,7 @@ export const ARTIFACT_CARDS: CardDef[] = [
   { 
     id: 'art_wind', name: '风囊', description: '吹飞敌人，无伤害，增强火势', 
     type: CardType.ARTIFACT, rarity: Rarity.SILVER, iconColor: '#88ff88', 
-    artifactConfig: { cooldown: 20, baseDamage: 0, element: ElementType.WIND, projectileType: 'area', color: 0xccffcc }
+    artifactConfig: { cooldown: 30, baseDamage: 0, element: ElementType.WIND, projectileType: 'area', color: 0xccffcc }
   },
   { 
     id: 'art_water', name: '白玉神盂', description: '喷射水流击退敌人，扑灭火焰', 
@@ -100,7 +100,7 @@ export const BUFF_CARDS: CardDef[] = [
 
 export const ALL_CARDS = [...STAT_CARDS, ...ARTIFACT_CARDS, ...EFFECT_CARDS, ...BUFF_CARDS];
 
-export const getRandomCard = (wave: number): CardDef => {
+export const getRandomCard = (wave: number, currentInventory: CardDef[] = []): CardDef => {
     // Rarity weights based on wave
     const prismChance = Math.min(0.2 + (wave / 100) * 10, 15); // 0.2% to 10%
     const goldChance = Math.min(5 + (wave / 100) * 40, 50); // 5% to 45%
@@ -110,9 +110,29 @@ export const getRandomCard = (wave: number): CardDef => {
     if (roll < prismChance) targetRarity = Rarity.PRISMATIC;
     else if (roll < prismChance + goldChance) targetRarity = Rarity.GOLD;
 
-    const pool = ALL_CARDS.filter(c => c.rarity === targetRarity);
-    const template = pool[Math.floor(Math.random() * pool.length)];
+    // Filter available cards
+    const pool = ALL_CARDS.filter(c => {
+        // Match Rarity
+        if (c.rarity !== targetRarity) return false;
+        
+        // Prevent Duplicate Artifacts
+        if (c.type === CardType.ARTIFACT) {
+            // Check if we already have an artifact with this name/ID base
+            // (Using ID base comparison in case we have logic to upgrade later, but strict check is fine for now)
+            const alreadyHas = currentInventory.some(invItem => invItem.id === c.id);
+            if (alreadyHas) return false;
+        }
+        return true;
+    });
+
+    // Fallback if pool is empty (e.g. collected all gold artifacts), downgrade rarity or pick stat
+    let finalPool = pool;
+    if (finalPool.length === 0) {
+        finalPool = STAT_CARDS; // Fallback to stats
+    }
+
+    const template = finalPool[Math.floor(Math.random() * finalPool.length)];
     
-    // Return a copy with unique ID
+    // Return a copy with unique ID (stats can be dupe, artifacts are filtered above)
     return { ...template, id: generateId() };
 }

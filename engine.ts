@@ -16,9 +16,9 @@ type Entity = Container & {
     isWet: boolean;
     wetTimer: number;
     isElectrified: boolean;
-    // Movement
-    dashCooldown: number;
-    isDashing: boolean;
+    // Player Specific
+    invulnTimer: number;
+    moveTarget?: {x: number, y: number};
 }
 
 type Bullet = Container & {
@@ -68,7 +68,7 @@ export class GameEngine {
     bullets: Bullet[] = [];
     particles: Particle[] = [];
     xpOrbs: XPOrb[] = [];
-    obstacles: Graphics[] = []; // Simple rects
+    obstacles: Graphics[] = []; 
 
     // Game Logic
     stats: PlayerStats;
@@ -77,9 +77,11 @@ export class GameEngine {
     gameTime: number = 0;
     
     // Input
-    keys: { [key: string]: boolean } = {};
     mouse: { x: number, y: number } = { x: 0, y: 0 };
-    isMoveMode: boolean = false; // 'F' toggles this
+    
+    // Performance
+    damageTextPool: Text[] = []; // Simple pool idea, or just throttling
+    damageTextTimer: number = 0;
 
     // Callbacks to React
     onUpdateStats: (stats: PlayerStats) => void;
@@ -109,7 +111,7 @@ export class GameEngine {
             level: 1,
             xp: 0,
             nextLevelXp: 10,
-            speed: 4,
+            speed: 5,
             damageMultiplier: 1,
             pickupRange: 100,
             inventory: []
@@ -147,7 +149,6 @@ export class GameEngine {
 
         // Bind Inputs
         window.addEventListener('keydown', this.handleKeyDown);
-        window.addEventListener('keyup', this.handleKeyUp);
         window.addEventListener('mousemove', this.handleMouseMove);
         window.addEventListener('mousedown', this.handleMouseDown);
 
@@ -166,7 +167,7 @@ export class GameEngine {
             iconColor: '#00ffff',
             artifactConfig: {
                 cooldown: 60,
-                baseDamage: 2, // 2 hits to kill wave 1 enemy (2hp)
+                baseDamage: 2, 
                 element: ElementType.PHYSICAL,
                 projectileType: 'projectile',
                 color: 0x00ffff
@@ -179,9 +180,20 @@ export class GameEngine {
         const cont = new Container() as Entity;
         
         const g = new Graphics();
-        // Pixi v8 syntax
-        g.rect(-8, -8, 16, 16).fill(0xffffff); // Pixel body
-        g.rect(-6, -6, 12, 12).fill(0x4444ff); // Cape
+        
+        // --- Pixel Art: Wizard ---
+        // Body (Blue Robe)
+        g.rect(-6, -8, 12, 16).fill(0x3b82f6); 
+        // Hood/Head shadow
+        g.rect(-6, -12, 12, 4).fill(0x1d4ed8);
+        // Face
+        g.rect(-4, -10, 8, 4).fill(0xffccaa);
+        // Belt
+        g.rect(-6, 0, 12, 2).fill(0xfca5a5);
+        // Staff (Brown)
+        g.rect(6, -10, 2, 20).fill(0x78350f);
+        // Staff Gem (Red)
+        g.rect(5, -12, 4, 4).fill(0xef4444);
 
         cont.addChild(g);
         cont.x = SCREEN_WIDTH / 2;
@@ -190,12 +202,10 @@ export class GameEngine {
         cont.vy = 0;
         cont.hp = 100;
         cont.maxHp = 100;
-        cont.radius = 10;
+        cont.radius = 12; // Hitbox radius
         cont.isDead = false;
         cont.zIndex = 100;
-        
-        cont.dashCooldown = 0;
-        cont.isDashing = false;
+        cont.invulnTimer = 0;
 
         return cont;
     }
@@ -213,17 +223,18 @@ export class GameEngine {
             const obs = new Graphics();
             const type = Math.random();
             if (type < 0.3) {
-                // Tree
-                obs.circle(0, 0, 20 + Math.random() * 20).fill(0x228b22);
+                // Pixel Tree
+                obs.rect(-4, 0, 8, 12).fill(0x5c4033); // Trunk
+                obs.rect(-12, -24, 24, 24).fill(0x228b22); // Leaves
             } else if (type < 0.6) {
-                // Rock
-                obs.rect(-15, -15, 30, 30).fill(0x555555);
+                // Pixel Rock
+                obs.rect(-10, -5, 20, 10).fill(0x555555);
+                obs.rect(-5, -10, 10, 5).fill(0x777777);
             } else {
-                // Wall
+                // Wall Segment
                 obs.rect(-10, -30, 20, 60).fill(0x8b4513);
             }
             
-            // Random pos relative to center
             const range = this.mapType === MapType.FIXED ? 1000 : 3000;
             obs.x = (Math.random() - 0.5) * 2 * range + SCREEN_WIDTH/2;
             obs.y = (Math.random() - 0.5) * 2 * range + SCREEN_HEIGHT/2;
@@ -234,15 +245,6 @@ export class GameEngine {
     }
 
     handleKeyDown = (e: KeyboardEvent) => {
-        this.keys[e.key.toLowerCase()] = true;
-        if (e.code === 'KeyF') {
-            this.isMoveMode = true;
-        }
-        if (e.code === 'KeyS') {
-            this.isMoveMode = false;
-            this.player.vx = 0;
-            this.player.vy = 0;
-        }
         if (e.code === 'Escape') {
             if (this.state === GameState.PLAYING) {
                 this.state = GameState.PAUSED;
@@ -254,56 +256,43 @@ export class GameEngine {
         }
     }
 
-    handleKeyUp = (e: KeyboardEvent) => {
-        this.keys[e.key.toLowerCase()] = false;
-    }
-
     handleMouseMove = (e: MouseEvent) => {
         this.mouse.x = e.clientX;
         this.mouse.y = e.clientY;
     }
 
-    handleMouseDown = () => {
+    handleMouseDown = (e: MouseEvent) => {
         if (this.state !== GameState.PLAYING) return;
         
-        // Dash Ability
-        if (this.player.dashCooldown <= 0) {
-            const dx = this.mouse.x - (SCREEN_WIDTH / 2);
-            const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
-            const dist = Math.hypot(dx, dy);
-            
-            if (dist > 1) {
-                // Normalize and boost
-                this.player.vx = (dx / dist) * 20; // High speed for dash
-                this.player.vy = (dy / dist) * 20;
-                this.player.isDashing = true;
-                this.player.dashCooldown = 60; // 1 second cooldown (at 60fps)
-                
-                // Visual feedback
-                this.spawnParticle(this.player.x, this.player.y, 0xffffff, 10);
-                this.spawnText("Dash!", this.player.x, this.player.y - 30, 0x00ffff);
-            }
-        }
+        // Click to move logic
+        // Transform screen coords to world coords
+        const worldX = (e.clientX - SCREEN_WIDTH/2) + this.player.x;
+        const worldY = (e.clientY - SCREEN_HEIGHT/2) + this.player.y;
+        
+        this.player.moveTarget = { x: worldX, y: worldY };
+        
+        // Spawn small click indicator
+        const marker = new Graphics();
+        marker.rect(-2, -2, 4, 4).fill(0xffffff);
+        marker.x = worldX;
+        marker.y = worldY;
+        this.world.addChild(marker);
+        setTimeout(() => marker.parent?.removeChild(marker), 300);
     }
 
     update(ticker: Ticker) {
         if (this.state !== GameState.PLAYING) return;
         
-        // Ticker provides delta, use it. Usually it's close to 1 for 60fps.
         const delta = ticker.deltaTime;
-
         this.gameTime += delta;
         this.waveTimer += delta;
 
-        // --- 1. Player Movement ---
-        this.updatePlayerMovement();
+        // --- 1. Player Movement (Click to Move) ---
+        this.updatePlayerMovement(delta);
 
         // --- 2. Camera Follow ---
-        const px = this.player.x;
-        const py = this.player.y;
-        
-        this.world.pivot.x = px;
-        this.world.pivot.y = py;
+        this.world.pivot.x = this.player.x;
+        this.world.pivot.y = this.player.y;
         this.world.position.x = SCREEN_WIDTH / 2;
         this.world.position.y = SCREEN_HEIGHT / 2;
 
@@ -320,48 +309,37 @@ export class GameEngine {
         this.updateXP(delta);
 
         // --- 6. Collision ---
-        this.handleCollisions();
+        this.handleCollisions(delta);
 
         // --- 7. Stats to React ---
-        // Throttle updates
-        if (Math.floor(this.gameTime) % 10 === 0) {
+        if (Math.floor(this.gameTime) % 15 === 0) {
             this.onUpdateStats({ ...this.stats, hp: this.player.hp, maxHp: this.player.maxHp });
         }
     }
 
-    updatePlayerMovement() {
-        // Cooldown
-        if (this.player.dashCooldown > 0) this.player.dashCooldown -= 1;
-
-        if (this.player.isDashing) {
-            // Apply dash velocity with high friction
-            this.player.x += this.player.vx;
-            this.player.y += this.player.vy;
-            this.player.vx *= 0.85;
-            this.player.vy *= 0.85;
-
-            // End dash if slow enough
-            if (Math.abs(this.player.vx) < 1 && Math.abs(this.player.vy) < 1) {
-                this.player.isDashing = false;
-            }
-            return; // Skip normal movement input during dash
+    updatePlayerMovement(delta: number) {
+        if (this.player.invulnTimer > 0) {
+            this.player.invulnTimer -= delta;
+            this.player.alpha = 0.5; // Flash effect
+        } else {
+            this.player.alpha = 1;
         }
 
-        if (this.isMoveMode) {
-            const dx = this.mouse.x - (SCREEN_WIDTH / 2);
-            const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
+        if (this.player.moveTarget) {
+            const dx = this.player.moveTarget.x - this.player.x;
+            const dy = this.player.moveTarget.y - this.player.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
-            if (dist > 10) {
-                this.player.vx = (dx / dist) * this.stats.speed;
-                this.player.vy = (dy / dist) * this.stats.speed;
+            if (dist > 5) {
+                // Move towards target
+                const speed = this.stats.speed * delta; // Normalize by delta
+                this.player.x += (dx / dist) * speed;
+                this.player.y += (dy / dist) * speed;
             } else {
-                this.player.vx = 0;
-                this.player.vy = 0;
+                // Arrived
+                this.player.moveTarget = undefined;
             }
         }
-        this.player.x += this.player.vx;
-        this.player.y += this.player.vy;
     }
 
     handleSpawning() {
@@ -373,6 +351,10 @@ export class GameEngine {
                 this.spawnEnemy(true);
             }
         }
+        
+        // Spawn rate cap
+        if (this.enemies.length > 300) return;
+
         const spawnChance = 0.02 + (this.wave * 0.005);
         if (Math.random() < spawnChance) {
             this.spawnEnemy(false);
@@ -381,30 +363,56 @@ export class GameEngine {
 
     spawnEnemy(isBoss: boolean) {
         const angle = Math.random() * Math.PI * 2;
-        const dist = 600 + Math.random() * 200; // Just offscreen
+        const dist = 600 + Math.random() * 200; 
         const x = this.player.x + Math.cos(angle) * dist;
         const y = this.player.y + Math.sin(angle) * dist;
 
         const cont = new Container() as Entity;
         const g = new Graphics();
         
-        // Visuals based on wave/boss
-        const color = isBoss ? 0xff0000 : (this.wave % 2 === 0 ? 0x00ff00 : 0xffaa00);
-        const size = isBoss ? 40 : (10 + Math.min(this.wave, 20));
-
-        if (this.wave > 50) {
-            // Cool shape for high levels
-            g.star(0, 0, 5, size, size/2).fill(color);
+        // --- Pixel Art: Monsters ---
+        if (isBoss) {
+            // Boss: Big Ogre
+            const color = 0xef4444; // Red
+            g.rect(-20, -25, 40, 50).fill(color); // Body
+            g.rect(-15, -15, 10, 10).fill(0xffff00); // Eye L
+            g.rect(5, -15, 10, 10).fill(0xffff00); // Eye R
+            g.rect(-10, 10, 20, 5).fill(0x000000); // Mouth
+            g.rect(-25, -5, 5, 20).fill(0x7f1d1d); // Arm L
+            g.rect(20, -5, 5, 20).fill(0x7f1d1d); // Arm R
         } else {
-            g.circle(0, 0, size).fill(color);
+            // Minions
+            const type = Math.floor(Math.random() * 3);
+            if (type === 0) {
+                // Goblin (Green)
+                g.rect(-6, -6, 12, 12).fill(0x10b981);
+                g.rect(-4, -4, 2, 2).fill(0x000000); // Eye
+                g.rect(2, -4, 2, 2).fill(0x000000); // Eye
+                g.rect(-8, -2, 2, 4).fill(0x059669); // Ear
+                g.rect(6, -2, 2, 4).fill(0x059669); // Ear
+            } else if (type === 1) {
+                // Slime (Cyan)
+                g.rect(-6, -4, 12, 8).fill(0x06b6d4);
+                g.rect(-5, -6, 10, 2).fill(0x06b6d4); // Top round
+                g.rect(-2, -2, 2, 2).fill(0xffffff); // Glint
+            } else {
+                // Bat (Purple)
+                g.rect(-4, -4, 8, 8).fill(0x8b5cf6);
+                g.rect(-8, -6, 4, 4).fill(0x6d28d9); // Wing
+                g.rect(4, -6, 4, 4).fill(0x6d28d9); // Wing
+            }
         }
 
         cont.addChild(g);
         cont.x = x;
         cont.y = y;
-        cont.maxHp = isBoss ? 500 * this.wave : (2 + this.wave * 2);
+        
+        // Balance: Lower scaling so it doesn't become impossible
+        const hpMultiplier = Math.pow(this.wave, 1.1); 
+        cont.maxHp = isBoss ? 300 * hpMultiplier : (5 + hpMultiplier * 2);
+        
         cont.hp = cont.maxHp;
-        cont.radius = size;
+        cont.radius = isBoss ? 25 : 8;
         cont.isDead = false;
         cont.vx = 0; 
         cont.vy = 0;
@@ -418,9 +426,6 @@ export class GameEngine {
         this.enemies.push(cont);
         this.world.addChild(cont);
     }
-
-    // --- WEAPON SYSTEM ---
-    weaponCooldowns: { [key: string]: number } = {};
 
     handleWeapons(delta: number) {
         let modifiers: { logic: string, count: number }[] = [];
@@ -477,6 +482,7 @@ export class GameEngine {
         const fireCount = double ? 2 : 1;
         
         for (let fc = 0; fc < fireCount; fc++) {
+             // Aim at mouse (screen to relative)
              const dx = this.mouse.x - (SCREEN_WIDTH / 2);
              const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
              let baseAngle = Math.atan2(dy, dx);
@@ -512,20 +518,29 @@ export class GameEngine {
         let speed = 5 * buffs.speedMult;
         let life = 60 * buffs.rangeMult;
         
-        // Pixi v8 syntax
         if (conf.projectileType === 'projectile') {
-            g.circle(0, 0, 5).fill(conf.color);
+            g.rect(-3, -3, 6, 6).fill(conf.color); // Pixel projectile
         } else if (conf.projectileType === 'beam') {
             g.rect(0, -5, 40, 10).fill(conf.color);
             speed = 10 * buffs.speedMult;
         } else if (conf.projectileType === 'area') {
-            g.moveTo(0,0);
-            g.arc(0,0, 100 * buffs.rangeMult, -0.5, 0.5); 
-            g.lineTo(0,0);
-            g.fill({ color: conf.color, alpha: 0.5 });
+            // Wind/Area visual improvement
+            if (conf.element === ElementType.WIND) {
+                // Swirly wind
+                const r = 100 * buffs.rangeMult;
+                g.arc(0,0, r, -0.5, 0.5).stroke({width: 2, color: 0xccffcc, alpha: 0.5});
+                g.arc(0,0, r*0.7, -0.2, 0.8).stroke({width: 2, color: 0xffffff, alpha: 0.3});
+                g.arc(0,0, r*0.4, -0.8, 0.2).stroke({width: 2, color: 0xccffcc, alpha: 0.5});
+            } else {
+                g.moveTo(0,0);
+                g.arc(0,0, 100 * buffs.rangeMult, -0.5, 0.5); 
+                g.lineTo(0,0);
+                g.fill({ color: conf.color, alpha: 0.5 });
+            }
             life = 10; 
             speed = 0; 
             if (conf.element === ElementType.FIRE) speed = 3; 
+            if (conf.element === ElementType.WIND) speed = 3;
         } else if (conf.projectileType === 'orbit') {
             g.rect(-5, -20, 10, 40).fill(conf.color); 
             speed = 0;
@@ -552,7 +567,7 @@ export class GameEngine {
         b.damage = conf.baseDamage * this.stats.damageMultiplier;
         b.element = conf.element;
         b.duration = life;
-        b.radius = 10;
+        b.radius = 12;
         b.ownerId = ownerId;
         b.isDead = false;
         b.isTracking = tracking;
@@ -563,7 +578,6 @@ export class GameEngine {
         if (conf.projectileType === 'projectile' || tracking) {
             b.trail = this.createTrail(conf.color);
             b.history = [];
-            // Add trail to world, not bullet, so it doesn't move with bullet transform
             this.world.addChildAt(b.trail, 0);
         }
 
@@ -574,6 +588,9 @@ export class GameEngine {
     createTrail(color: number) {
         return new Graphics(); 
     }
+
+    // --- ENEMY LOGIC & WEAPON COOLDOWNS ---
+    weaponCooldowns: { [key: string]: number } = {};
 
     updateEnemies(delta: number) {
         const playerPos = { x: this.player.x, y: this.player.y };
@@ -586,13 +603,16 @@ export class GameEngine {
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             if (dist > 10) {
-                e.x += (dx / dist) * (1 + (this.wave * 0.01));
-                e.y += (dy / dist) * (1 + (this.wave * 0.01));
+                // Base speed + slight wave scaling
+                const moveSpeed = (1 + (this.wave * 0.005)) * delta;
+                e.x += (dx / dist) * moveSpeed;
+                e.y += (dy / dist) * moveSpeed;
             }
 
             if (e.isBurning) {
-                e.hp -= 0.1;
-                this.spawnParticle(e.x, e.y, 0xff4500);
+                e.hp -= 0.1 * delta;
+                // Reduce burn particle freq
+                if (Math.random() < 0.1) this.spawnParticle(e.x, e.y, 0xff4500);
             }
 
             if (e.hp <= 0) this.killEnemy(e);
@@ -614,12 +634,14 @@ export class GameEngine {
             }
 
             if (b.ownerId === 'art_sword_orbit') {
-                b.rotation += 0.1;
+                b.rotation += 0.1 * delta;
                 b.x = this.player.x + Math.cos(b.rotation) * 100;
                 b.y = this.player.y + Math.sin(b.rotation) * 100;
             } else if (b.isTracking) {
                 let nearest = null;
                 let minDst = 1000;
+                // Optimized search: only check every few frames or check random subset?
+                // For now, simple check is okay for <100 enemies
                 for (const e of this.enemies) {
                     const d = Math.hypot(e.x - b.x, e.y - b.y);
                     if (d < minDst) { minDst = d; nearest = e; }
@@ -629,11 +651,11 @@ export class GameEngine {
                     b.vx = Math.cos(angle) * 5;
                     b.vy = Math.sin(angle) * 5;
                 }
-                b.x += b.vx;
-                b.y += b.vy;
+                b.x += b.vx * delta;
+                b.y += b.vy * delta;
             } else {
-                b.x += b.vx;
-                b.y += b.vy;
+                b.x += b.vx * delta;
+                b.y += b.vy * delta;
             }
 
             // Update Trail
@@ -647,8 +669,6 @@ export class GameEngine {
                     for (let i = 1; i < b.history.length; i++) {
                         b.trail.lineTo(b.history[i].x, b.history[i].y);
                     }
-                    const child = b.children[0] as Graphics;
-                    // v8 stroke
                     b.trail.stroke({ width: 2, color: 0xffffff, alpha: 0.3 });
                 }
             }
@@ -658,9 +678,9 @@ export class GameEngine {
 
     updateParticles(delta: number) {
         this.particles.forEach(p => {
-            p.x += p.vx;
-            p.y += p.vy;
-            p.alpha -= 0.05;
+            p.x += p.vx * delta;
+            p.y += p.vy * delta;
+            p.alpha -= 0.05 * delta;
             p.life -= delta;
             if (p.life <= 0) {
                 p.parent?.removeChild(p);
@@ -676,8 +696,8 @@ export class GameEngine {
             const dist = Math.sqrt(dx*dx + dy*dy);
             
             if (dist < this.stats.pickupRange) {
-                orb.x += (dx/dist) * 8;
-                orb.y += (dy/dist) * 8;
+                orb.x += (dx/dist) * 8 * delta;
+                orb.y += (dy/dist) * 8 * delta;
                 
                 if (dist < 10) {
                     this.stats.xp += orb.value;
@@ -691,7 +711,28 @@ export class GameEngine {
         this.xpOrbs = this.xpOrbs.filter(o => o.parent);
     }
 
-    handleCollisions() {
+    handleCollisions(delta: number) {
+        // Player vs Enemy Collision (Contact Damage)
+        if (this.player.invulnTimer <= 0) {
+            for (const e of this.enemies) {
+                 const dx = this.player.x - e.x;
+                 const dy = this.player.y - e.y;
+                 const dist = Math.sqrt(dx * dx + dy * dy);
+                 if (dist < (this.player.radius + e.radius)) {
+                     // Hit
+                     this.player.hp -= 5 + (this.wave * 0.5); // Damage scales slowly
+                     this.player.invulnTimer = 30; // 0.5s i-frame
+                     this.spawnText("-HP", this.player.x, this.player.y - 30, 0xff0000);
+                     if (this.player.hp <= 0) {
+                         this.state = GameState.GAME_OVER;
+                         // Handle game over logic
+                     }
+                     break; // One hit per frame max
+                 }
+            }
+        }
+
+        // Bullet vs Enemy
         for (const b of this.bullets) {
             if (b.isDead) continue;
             for (const e of this.enemies) {
@@ -723,8 +764,18 @@ export class GameEngine {
         return obj._tempId;
     }
 
+    damageTextCooldown = 0;
+
     applyDamage(e: Entity, b: Bullet) {
         let dmg = b.damage;
+
+        // --- Wind Knockback ---
+        if (b.element === ElementType.WIND) {
+            const angle = Math.atan2(e.y - b.y, e.x - b.x);
+            // Strong push
+            e.x += Math.cos(angle) * 30; 
+            e.y += Math.sin(angle) * 30;
+        }
 
         if (b.element === ElementType.FIRE) {
             e.isBurning = true;
@@ -737,7 +788,7 @@ export class GameEngine {
         if (b.element === ElementType.WATER) {
             e.isWet = true;
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
-            e.x += Math.cos(angle) * 20;
+            e.x += Math.cos(angle) * 20; // Water mild push
             e.y += Math.sin(angle) * 20;
             
             if (e.isBurning) {
@@ -760,10 +811,20 @@ export class GameEngine {
         }
 
         e.hp -= dmg;
-        this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffffff);
+
+        // Optimization: Don't spawn text on every single hit if laggy
+        this.damageTextCooldown--;
+        if (this.damageTextCooldown <= 0 || dmg > 10) { // Always show high dmg
+            this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffffff);
+            this.damageTextCooldown = 2; // Throttle
+        }
     }
 
     triggerChainLightning(source: Entity, dmg: number) {
+        // Optimization: Use one shared Graphics for frame? 
+        // For simplicity, just don't draw if too many enemies to avoid overload
+        if (this.enemies.length > 200) return; 
+
         this.enemies.forEach(target => {
             if (target === source) return;
             const d = Math.hypot(target.x - source.x, target.y - source.y);
@@ -785,14 +846,21 @@ export class GameEngine {
         
         const orb = new Graphics() as XPOrb;
         let color = 0x888888;
-        let size = 4;
+        let size = 6;
         const val = 1 + (this.wave * 0.5);
         
-        if (this.wave > 10) { color = 0x00ff00; size = 6; }
-        if (this.wave > 30) { color = 0x0000ff; size = 8; }
-        if (this.wave > 80) { color = 0xff00ff; size = 12; }
+        if (this.wave > 10) { color = 0x00ff00; size = 8; }
+        if (this.wave > 30) { color = 0x00ffff; size = 10; } // Cyan
+        if (this.wave > 80) { color = 0xffd700; size = 12; } // Gold
 
-        orb.rect(-size/2, -size/2, size, size).fill(color);
+        // Diamond Shape for better visibility
+        orb.poly([
+            0, -size,
+            size, 0,
+            0, size,
+            -size, 0
+        ]).fill(color);
+
         orb.x = e.x;
         orb.y = e.y;
         orb.value = val;
@@ -815,12 +883,16 @@ export class GameEngine {
     }
 
     spawnText(text: string, x: number, y: number, color: number) {
+        // Optimization check
+        if (this.app.ticker.FPS < 40 && Math.random() > 0.5) return;
+
         const t = new Text({
             text: text,
             style: {
                 fontFamily: 'PixelFont',
                 fontSize: 14,
                 fill: color,
+                stroke: { color: 0x000000, width: 2 },
                 align: 'center'
             }
         });
@@ -841,6 +913,8 @@ export class GameEngine {
     }
 
     spawnParticle(x: number, y: number, color: number, count = 3) {
+        if (this.app.ticker.FPS < 30) return; // Skip particles on low FPS
+
         for(let i=0; i<count; i++) {
             const p = new Graphics() as Particle;
             p.rect(0,0, 2,2).fill(color);
@@ -877,7 +951,6 @@ export class GameEngine {
             this.app.destroy({ removeView: true } as any);
         } catch(e) { console.error(e) }
         window.removeEventListener('keydown', this.handleKeyDown);
-        window.removeEventListener('keyup', this.handleKeyUp);
         window.removeEventListener('mousemove', this.handleMouseMove);
         window.removeEventListener('mousedown', this.handleMouseDown);
     }

@@ -25,9 +25,14 @@ const App = () => {
       (newState) => {
           setGameState(newState);
           if (newState === GameState.LEVEL_UP) {
-              // Generate 3 random cards
+              // Generate 3 random cards, passing inventory for deduplication
               const wave = engineRef.current?.wave || 1;
-              const opts = [getRandomCard(wave), getRandomCard(wave), getRandomCard(wave)];
+              const inv = engineRef.current?.stats.inventory || [];
+              const opts = [
+                  getRandomCard(wave, inv), 
+                  getRandomCard(wave, inv), 
+                  getRandomCard(wave, inv)
+              ];
               setLevelUpOptions(opts);
           }
       },
@@ -113,8 +118,7 @@ const App = () => {
             </button>
           </div>
           <div className="instructions mt-8 text-center">
-            操作: 鼠标瞄准, F 键移动 (跟随鼠标), S 键站立.<br/>
-            左键点击: 冲刺 (Dash).<br/>
+            操作: 鼠标移动瞄准, 点击地面移动.<br/>
             Esc 暂停/整理背包.
           </div>
         </div>
