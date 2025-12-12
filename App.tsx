@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine';
-import { GameState, MapType, PlayerStats, CardDef, CardType } from './types';
+import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
 import { getRandomCard, STAT_CARDS, COLORS } from './constants';
 
 const App = () => {
@@ -11,6 +11,10 @@ const App = () => {
   const [stats, setStats] = useState<PlayerStats | null>(null);
   const [levelUpOptions, setLevelUpOptions] = useState<CardDef[]>([]);
   const [bossWarning, setBossWarning] = useState<string | null>(null);
+  
+  // Drag State
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   
   // Initialize Engine
   useEffect(() => {
@@ -49,9 +53,6 @@ const App = () => {
             await engine.init();
         } catch (e: any) {
             console.error("Engine Init Failed", e);
-            // If the error is the specific Pixi extension batcher error, it means
-            // Pixi is likely already initialized in the global scope (hot reload/strict mode issue).
-            // We can often safely ignore this in dev environments if the canvas attaches correctly.
         }
     };
     
@@ -76,24 +77,105 @@ const App = () => {
     setGameState(GameState.PLAYING);
   };
 
-  // Drag and Drop Logic for Pause Menu
+  // --- Better Drag and Drop Logic ---
+
   const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggingIndex(index);
     e.dataTransfer.setData("index", index.toString());
+    e.dataTransfer.effectAllowed = "move";
+    
+    // Create a ghost image if needed, or rely on browser default. 
+    // Browser default is usually fine if the element isn't too complex.
+  };
+
+  const handleDragEnter = (index: number) => {
+    if (draggingIndex === null) return;
+    if (draggingIndex === index) return;
+    setDragOverIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault(); // Necessary to allow dropping
+  };
+
+  const handleDragEnd = () => {
+    setDraggingIndex(null);
+    setDragOverIndex(null);
   };
 
   const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
     const dragIndex = parseInt(e.dataTransfer.getData("index"));
+    
     if (isNaN(dragIndex) || !stats) return;
 
     const newInv = [...stats.inventory];
     const [moved] = newInv.splice(dragIndex, 1);
+    
+    // If dropping on itself, or invalid, do nothing (logic handled by splice)
+    // But we need to insert at correct new position.
+    
+    // Calculate actual insertion index.
+    // If we drag from 0 to 5, we remove 0, then insert at 5.
+    // If we drag from 5 to 0, we remove 5, then insert at 0.
     newInv.splice(dropIndex, 0, moved);
     
     engineRef.current?.reorderInventory(newInv);
     setStats({ ...stats, inventory: newInv });
+    
+    setDraggingIndex(null);
+    setDragOverIndex(null);
   };
 
-  const handleDragOver = (e: React.DragEvent) => e.preventDefault();
+  // Render logic for inventory with gap preview
+  const renderInventory = () => {
+      if (!stats) return null;
+
+      const items = stats.inventory.map((card, index) => {
+          const isDragging = draggingIndex === index;
+          
+          return (
+            <React.Fragment key={card.id}>
+              {/* Drop Target Gap Preview (If dragging something else and hovering here) */}
+              {dragOverIndex === index && draggingIndex !== null && draggingIndex > index && (
+                   <div className="inv-slot-placeholder" />
+              )}
+              
+              <div
+                 draggable
+                 onDragStart={(e) => handleDragStart(e, index)}
+                 onDragOver={handleDragOver}
+                 onDragEnter={() => handleDragEnter(index)}
+                 onDragEnd={handleDragEnd}
+                 onDrop={(e) => handleDrop(e, index)}
+                 className={`inv-slot group ${isDragging ? 'dragging' : ''}`}
+                 style={{ borderColor: card.iconColor }}
+               >
+                 {card.type === CardType.EFFECT && <span className="badge badge-effect">E</span>}
+                 {card.type === CardType.BUFF && <span className="badge badge-buff">B</span>}
+                 
+                 <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
+                    {card.name.substring(0, 2)}
+                 </span>
+                 
+                 {/* Hover Tooltip */}
+                 <div className="tooltip">
+                    <div className="font-bold" style={{ color: card.iconColor }}>{card.name}</div>
+                    <div className="text-tiny">{card.description}</div>
+                    <div className="text-tiny text-gray-400 mt-1 uppercase">{card.rarity}</div>
+                 </div>
+               </div>
+
+              {/* Drop Target Gap Preview (If dragging something else and hovering here) */}
+              {dragOverIndex === index && draggingIndex !== null && draggingIndex < index && (
+                   <div className="inv-slot-placeholder" />
+              )}
+            </React.Fragment>
+          );
+      });
+
+      return items;
+  }
 
   return (
     <div className="app-container">
@@ -125,7 +207,7 @@ const App = () => {
       )}
 
       {/* --- HUD --- */}
-      {gameState === GameState.PLAYING && stats && (
+      {(gameState === GameState.PLAYING || gameState === GameState.PRE_LEVEL_UP) && stats && (
         <div className="absolute inset-0 pointer-events-none p-4">
            {/* HP Bar */}
            <div className="bar-container bar-hp">
@@ -173,17 +255,15 @@ const App = () => {
       {/* --- LEVEL UP --- */}
       {gameState === GameState.LEVEL_UP && (
         <div className="absolute inset-0 overlay-darker flex flex-col items-center justify-center z-50">
-          <h2 className="levelup-title mb-8">等级提升! 选择强化</h2>
+          <h2 className="levelup-title mb-8">等级提升!</h2>
           <div className="flex gap-4">
             {levelUpOptions.map((card, i) => (
               <div 
                 key={i}
                 onClick={() => selectCard(card)}
-                className="card"
-                style={{ borderColor: card.iconColor }}
+                className={`card rarity-${card.rarity}`}
               >
                 <div className="card-icon">
-                   {/* Placeholder Icon */}
                    <div style={{ color: card.iconColor }}>★</div>
                 </div>
                 <h3 className="card-name mb-2" style={{ color: card.iconColor }}>{card.name}</h3>
@@ -205,28 +285,7 @@ const App = () => {
            </p>
            
            <div className="inv-grid gap-2">
-             {stats.inventory.map((card, index) => (
-               <div
-                 key={card.id}
-                 draggable
-                 onDragStart={(e) => handleDragStart(e, index)}
-                 onDrop={(e) => handleDrop(e, index)}
-                 onDragOver={handleDragOver}
-                 className="inv-slot group"
-                 style={{ borderColor: card.iconColor }}
-                 title={card.name + "\n" + card.description}
-               >
-                 {card.type === CardType.EFFECT && <span className="badge badge-effect">E</span>}
-                 {card.type === CardType.BUFF && <span className="badge badge-buff">B</span>}
-                 {card.name.substring(0, 2)}
-                 
-                 {/* Hover Tooltip */}
-                 <div className="tooltip">
-                    <div className="font-bold">{card.name}</div>
-                    <div className="text-tiny">{card.description}</div>
-                 </div>
-               </div>
-             ))}
+             {renderInventory()}
            </div>
 
            <button 

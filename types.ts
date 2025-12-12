@@ -2,6 +2,7 @@ export enum GameState {
   MENU,
   PLAYING,
   PAUSED,
+  PRE_LEVEL_UP, // New state for animation
   LEVEL_UP,
   GAME_OVER,
   VICTORY

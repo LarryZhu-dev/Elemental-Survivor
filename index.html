@@ -166,6 +166,7 @@
       .levelup-title {
         font-size: 2.25rem; /* 4xl */
         color: #fde047; /* yellow-300 */
+        text-shadow: 0 0 10px rgba(253, 224, 71, 0.5);
       }
       .card {
         width: 12rem;
@@ -176,9 +177,28 @@
         display: flex;
         flex-direction: column;
         cursor: pointer;
-        transition: transform 0.1s;
+        transition: transform 0.1s, box-shadow 0.2s;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.5);
       }
-      .card:hover { transform: scale(1.05); }
+      .card:hover { 
+        transform: scale(1.05) translateY(-5px); 
+        box-shadow: 0 10px 15px rgba(0,0,0,0.5);
+      }
+      /* Card Rarity Styles */
+      .rarity-silver {
+        border-color: #e2e8f0;
+        box-shadow: 0 0 10px rgba(226, 232, 240, 0.2);
+      }
+      .rarity-gold {
+        border-color: #fbbf24;
+        box-shadow: 0 0 15px rgba(251, 191, 36, 0.4);
+      }
+      .rarity-prismatic {
+        border-color: #d946ef;
+        box-shadow: 0 0 20px rgba(217, 70, 239, 0.6);
+        background: linear-gradient(135deg, #1e293b 0%, #311b36 100%);
+      }
+
       .card-icon {
         height: 6rem;
         width: 100%;
@@ -192,6 +212,7 @@
       .card-name {
         font-size: 1.125rem; /* lg */
         font-weight: bold;
+        text-shadow: 1px 1px 0px black;
       }
       .card-desc {
         font-size: 0.75rem; /* xs */
@@ -226,6 +247,7 @@
         border: 2px solid #4b5563; /* gray-600 */
         background-color: #111827; /* gray-900 */
         min-height: 200px;
+        align-content: flex-start;
       }
       .inv-slot {
         width: 4rem;
@@ -239,8 +261,20 @@
         text-align: center;
         cursor: grab;
         position: relative;
+        transition: transform 0.2s, background-color 0.2s;
+        box-sizing: border-box;
       }
-      .inv-slot:active { cursor: grabbing; }
+      .inv-slot:active { cursor: grabbing; transform: scale(0.95); }
+      .inv-slot.dragging { opacity: 0.5; }
+      
+      /* New Drag Visuals */
+      .inv-slot-placeholder {
+        width: 4rem;
+        height: 4rem;
+        border: 2px dashed #666;
+        background: rgba(255,255,255,0.1);
+      }
+
       .badge {
         position: absolute;
         top: 0;
@@ -256,7 +290,7 @@
         position: absolute;
         bottom: 100%;
         margin-bottom: 0.5rem;
-        width: 8rem;
+        width: 10rem;
         background-color: black;
         border: 1px solid white;
         padding: 0.5rem;
@@ -264,6 +298,7 @@
         pointer-events: none;
         text-align: left;
         display: none;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.5);
       }
       .group:hover .tooltip { display: block; }
       .font-bold { font-weight: bold; }

@@ -38,8 +38,8 @@ type Bullet = Container & {
     pierce: number;
     hitList: Set<number>; // Enemy IDs hit
     // Visuals
-    trail?: Graphics;
-    history?: {x: number, y: number}[];
+    trailTimer: number; // For spawning particle trails
+    color: number; // For particle trails
 }
 
 type Particle = Graphics & {
@@ -47,6 +47,7 @@ type Particle = Graphics & {
     vy: number;
     life: number;
     maxLife: number;
+    isStatic: boolean; // Does it move?
 }
 
 type XPOrb = Graphics & {
@@ -62,7 +63,6 @@ export class GameEngine {
     
     // Containers
     world: Container;
-    playerContainer: Container;
     
     // Entities
     player: Entity;
@@ -82,6 +82,9 @@ export class GameEngine {
     waveTotalEnemies: number = 0;
     waveEnemiesSpawned: number = 0;
     waveDelayTimer: number = 0;
+
+    // Cutscene Logic
+    preLevelUpTimer: number = 0;
 
     // Input
     mouse: { x: number, y: number } = { x: 0, y: 0 };
@@ -130,7 +133,6 @@ export class GameEngine {
         // Placeholders to satisfy TS, real init in init()
         this.world = new Container(); 
         this.player = new Container() as Entity; 
-        this.playerContainer = this.player;
     }
 
     async init() {
@@ -152,7 +154,6 @@ export class GameEngine {
         // Init Player
         this.player = this.createPlayer();
         this.world.addChild(this.player);
-        this.playerContainer = this.player; // Alias
 
         // Bind Inputs
         window.addEventListener('keydown', this.handleKeyDown);
@@ -296,9 +297,40 @@ export class GameEngine {
     }
 
     update(ticker: Ticker) {
+        const delta = ticker.deltaTime;
+        
+        // Always update particles for visuals, even in pre-level-up
+        this.updateParticles(delta);
+
+        if (this.state === GameState.PRE_LEVEL_UP) {
+            // Cutscene Logic
+            this.preLevelUpTimer -= delta;
+            
+            // Spawn fancy upward particles
+            if (Math.random() < 0.3) {
+                 this.spawnParticle(
+                     this.player.x + (Math.random()-0.5)*30, 
+                     this.player.y + 10, 
+                     0xffd700, 
+                     1, 
+                     true // Upward flow
+                 );
+            }
+
+            // Camera still follows player slightly
+            this.world.pivot.x = this.player.x;
+            this.world.pivot.y = this.player.y;
+            this.world.position.x = SCREEN_WIDTH / 2;
+            this.world.position.y = SCREEN_HEIGHT / 2;
+
+            if (this.preLevelUpTimer <= 0) {
+                this.triggerLevelUpUI();
+            }
+            return;
+        }
+
         if (this.state !== GameState.PLAYING) return;
         
-        const delta = ticker.deltaTime;
         this.gameTime += delta;
         
         // --- 1. Player Movement (Click to Move) ---
@@ -319,7 +351,6 @@ export class GameEngine {
         // --- 5. Entity Updates ---
         this.updateEnemies(delta);
         this.updateBullets(delta);
-        this.updateParticles(delta);
         this.updateXP(delta);
 
         // --- 6. Collision ---
@@ -555,31 +586,35 @@ export class GameEngine {
         const b = new Container() as Bullet;
         const g = new Graphics();
         
+        // --- Visuals ---
+        // Use 'add' blend mode for glowy look
+        // We can't set blendMode on Container in v8 easily without filters or specific structure
+        // But we can set it on the Graphics child.
+        
         let speed = 5 * buffs.speedMult;
-        let life = 60 * buffs.rangeMult;
+        let life = 180 * buffs.rangeMult; // Increased from 60 to 180 (3 seconds) to fix disappearance
         
         if (conf.projectileType === 'projectile') {
-            // Enhanced visual for basic projectiles
             g.circle(0,0, 4).fill(0xffffff); // Core
-            g.circle(0,0, 6).fill({ color: conf.color, alpha: 0.5 }); // Glow
-            // Add a small sparkly tail
+            g.circle(0,0, 8).fill({ color: conf.color, alpha: 0.6 }); // Glow
+            g.blendMode = 'add';
         } else if (conf.projectileType === 'beam') {
             g.rect(0, -5, 40, 10).fill(conf.color);
+            g.blendMode = 'add';
             speed = 10 * buffs.speedMult;
         } else if (conf.projectileType === 'area') {
             // Wind/Area visual improvement
             if (conf.element === ElementType.WIND) {
-                // Swirly wind
                 const r = 100 * buffs.rangeMult;
                 g.arc(0,0, r, -0.5, 0.5).stroke({width: 2, color: 0xccffcc, alpha: 0.5});
                 g.arc(0,0, r*0.7, -0.2, 0.8).stroke({width: 2, color: 0xffffff, alpha: 0.3});
-                g.arc(0,0, r*0.4, -0.8, 0.2).stroke({width: 2, color: 0xccffcc, alpha: 0.5});
             } else {
                 g.moveTo(0,0);
                 g.arc(0,0, 100 * buffs.rangeMult, -0.5, 0.5); 
                 g.lineTo(0,0);
                 g.fill({ color: conf.color, alpha: 0.5 });
             }
+            g.blendMode = 'add';
             life = 10; 
             speed = 0; 
             if (conf.element === ElementType.FIRE) speed = 3; 
@@ -595,13 +630,9 @@ export class GameEngine {
         
         b.addChild(g);
         
-        if (conf.projectileType === 'orbit') {
-            b.x = this.player.x;
-            b.y = this.player.y;
-        } else {
-            b.x = this.player.x;
-            b.y = this.player.y;
-        }
+        // Position
+        b.x = this.player.x;
+        b.y = this.player.y;
 
         b.vx = Math.cos(angle) * speed;
         b.vy = Math.sin(angle) * speed;
@@ -616,20 +647,13 @@ export class GameEngine {
         b.isTracking = tracking;
         b.hitList = new Set();
         b.pierce = (conf.projectileType === 'area' || conf.projectileType === 'orbit') ? 999 : 1;
-
-        // Trail Logic
-        if (conf.projectileType === 'projectile' || tracking) {
-            b.trail = this.createTrail(conf.color);
-            b.history = [];
-            this.world.addChildAt(b.trail, 0);
-        }
+        
+        // Particle Trail Config
+        b.color = conf.color;
+        b.trailTimer = 0;
 
         this.bullets.push(b);
         this.world.addChild(b);
-    }
-
-    createTrail(color: number) {
-        return new Graphics(); 
     }
 
     // --- ENEMY LOGIC & WEAPON COOLDOWNS ---
@@ -680,13 +704,17 @@ export class GameEngine {
             if (b.duration <= 0) {
                 b.isDead = true;
                 b.parent?.removeChild(b);
-                b.trail?.parent?.removeChild(b.trail);
                 return;
             }
 
-            // Particle effect for projectiles
-            if ((b.element === ElementType.PHYSICAL || b.element === ElementType.FIRE) && Math.random() < 0.3) {
-                 this.spawnParticle(b.x, b.y, 0xffffaa, 1);
+            // Particle Trails (Replaces old line trail)
+            // Spawn a particle every 3 frames if it's a moving projectile
+            if (b.vx !== 0 || b.vy !== 0) {
+                b.trailTimer -= delta;
+                if (b.trailTimer <= 0) {
+                    this.spawnParticle(b.x, b.y, b.color, 1);
+                    b.trailTimer = 3; 
+                }
             }
 
             if (b.ownerId === 'art_sword_orbit') {
@@ -703,8 +731,10 @@ export class GameEngine {
                 }
                 if (nearest) {
                     const angle = Math.atan2(nearest.y - b.y, nearest.x - b.x);
-                    b.vx = Math.cos(angle) * 5;
-                    b.vy = Math.sin(angle) * 5;
+                    // Slight turn speed
+                    b.vx = b.vx * 0.9 + Math.cos(angle) * 1;
+                    b.vy = b.vy * 0.9 + Math.sin(angle) * 1;
+                    // Normalize to max speed? Or just let it drift.
                 }
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
@@ -712,36 +742,26 @@ export class GameEngine {
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
             }
-
-            // Update Trail
-            if (b.trail && b.history) {
-                b.history.push({x: b.x, y: b.y});
-                if (b.history.length > 8) b.history.shift();
-                
-                b.trail.clear();
-                if (b.history.length > 1) {
-                    b.trail.moveTo(b.history[0].x, b.history[0].y);
-                    for (let i = 1; i < b.history.length; i++) {
-                        b.trail.lineTo(b.history[i].x, b.history[i].y);
-                    }
-                    b.trail.stroke({ width: 2, color: 0xffffff, alpha: 0.3 });
-                }
-            }
         });
         this.bullets = this.bullets.filter(b => !b.isDead);
     }
 
     updateParticles(delta: number) {
         this.particles.forEach(p => {
-            p.x += p.vx * delta;
-            p.y += p.vy * delta;
-            p.alpha -= 0.05 * delta;
+            if (!p.isStatic) {
+                p.x += p.vx * delta;
+                p.y += p.vy * delta;
+            }
+            p.alpha -= 0.03 * delta;
+            p.scale.x *= 0.95; // Shrink
+            p.scale.y *= 0.95;
             p.life -= delta;
-            if (p.life <= 0) {
+            
+            if (p.life <= 0 || p.alpha <= 0) {
                 p.parent?.removeChild(p);
             }
         });
-        this.particles = this.particles.filter(p => p.life > 0);
+        this.particles = this.particles.filter(p => p.life > 0 && p.alpha > 0);
     }
 
     updateXP(delta: number) {
@@ -758,7 +778,7 @@ export class GameEngine {
                     this.stats.xp += orb.value;
                     orb.parent?.removeChild(orb);
                     if (this.stats.xp >= this.stats.nextLevelXp) {
-                        this.levelUp();
+                        this.startLevelUpSequence();
                     }
                 }
             }
@@ -807,7 +827,6 @@ export class GameEngine {
                     if (b.pierce <= 0) {
                         b.isDead = true;
                         b.parent?.removeChild(b);
-                        b.trail?.parent?.removeChild(b.trail);
                         break; 
                     }
                 }
@@ -870,6 +889,9 @@ export class GameEngine {
 
         e.hp -= dmg;
 
+        // Visual impact particles
+        this.spawnParticle(e.x, e.y, b.color, 3);
+
         // Optimization: Don't spawn text on every single hit if laggy
         this.damageTextCooldown--;
         if (this.damageTextCooldown <= 0 || dmg > 10) { // Always show high dmg
@@ -879,8 +901,6 @@ export class GameEngine {
     }
 
     triggerChainLightning(source: Entity, dmg: number) {
-        // Optimization: Use one shared Graphics for frame? 
-        // For simplicity, just don't draw if too many enemies to avoid overload
         if (this.enemies.length > 200) return; 
 
         this.enemies.forEach(target => {
@@ -932,7 +952,16 @@ export class GameEngine {
         }
     }
 
-    levelUp() {
+    startLevelUpSequence() {
+        this.state = GameState.PRE_LEVEL_UP;
+        this.preLevelUpTimer = 90; // 1.5 seconds at 60fps
+        this.onGameStateChange(GameState.PRE_LEVEL_UP);
+        
+        // Spawn Big Text
+        this.spawnText("LEVEL UP!", this.player.x, this.player.y - 50, 0xffd700);
+    }
+
+    triggerLevelUpUI() {
         this.state = GameState.LEVEL_UP;
         this.onGameStateChange(GameState.LEVEL_UP);
         this.stats.level++;
@@ -970,17 +999,26 @@ export class GameEngine {
         this.app.ticker.add(anim);
     }
 
-    spawnParticle(x: number, y: number, color: number, count = 3) {
+    spawnParticle(x: number, y: number, color: number, count = 3, upward = false) {
         if (this.app.ticker.FPS < 30) return; // Skip particles on low FPS
 
         for(let i=0; i<count; i++) {
             const p = new Graphics() as Particle;
-            p.rect(0,0, 2,2).fill(color);
+            p.circle(0,0, 3).fill(color);
             p.x = x;
             p.y = y;
-            p.vx = (Math.random()-0.5) * 4;
-            p.vy = (Math.random()-0.5) * 4;
-            p.life = 20;
+            if (upward) {
+                p.vx = (Math.random()-0.5) * 2;
+                p.vy = -Math.random() * 3 - 1; // Always up
+            } else {
+                p.vx = (Math.random()-0.5) * 4;
+                p.vy = (Math.random()-0.5) * 4;
+            }
+            p.life = 30;
+            p.maxLife = 30;
+            p.isStatic = false;
+            p.blendMode = 'add'; // GLOW
+            
             this.particles.push(p);
             this.world.addChild(p);
         }
