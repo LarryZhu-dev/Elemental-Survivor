@@ -60,6 +60,7 @@ type XPOrb = Graphics & {
     value: number;
     vx: number;
     vy: number;
+    isMagnetized?: boolean;
 }
 
 interface DelayedAction {
@@ -557,13 +558,10 @@ export class GameEngine {
         let buffStats = { rangeMult: 1, speedMult: 1, freqMult: 1 };
         
         // We iterate through the inventory.
-        // Logic:
-        // 1. Calculate execution params based on CURRENT activeEffects.
-        // 2. If card is EFFECT, add to list of active effects for NEXT cards.
-        // 3. If card is ARTIFACT, execute it using params.
-        // 4. Aging: Decrement counts of activeEffects. 
-        //    CRITICAL: Effects added THIS iteration should NOT decrement this iteration,
-        //    otherwise an influenceCount of 1 expires before reaching the next card.
+        // Updated Logic for Stacking:
+        // Logic modifiers (e.g., Double) affect the next card regardless of type, so they are consumed by Effects AND Artifacts.
+        // Spatial modifiers (e.g., Split/Fan) usually only make sense for Artifacts. They should persist through intermediate Effect cards
+        // so you can have [Split] -> [Double] -> [Weapon] and the weapon gets Split + Double.
 
         for (const card of this.stats.inventory) {
             // Cooldown Reduction Buffs
@@ -575,7 +573,6 @@ export class GameEngine {
             }
 
             // Determine Repetition Count based on active 'double' effects
-            // Logic: Base 1. Each 'double' effect multiplies execution by 2.
             let executionCount = 1;
             activeEffects.forEach(eff => {
                 if (eff.logic === 'double') executionCount *= 2;
@@ -623,10 +620,22 @@ export class GameEngine {
                 }
             }
 
-            // Decrement Effect Counts (Age the effects)
-            // Only decrement effects that were already present (passed over this card)
-            // New effects added by this card apply to the NEXT card, so they shouldn't decrement yet.
-            activeEffects.forEach(eff => eff.count--);
+            // Aging Logic (Decrement Counts)
+            // Fix: Logic modifiers (Double) must decrement on EFFECTS (to prevent infinite multiplication of modifiers).
+            // Spatial modifiers (Split, Fan) should ONLY decrement on ARTIFACTS (so they pass through intermediate effects).
+            
+            const isArtifact = card.type === CardType.ARTIFACT;
+            
+            activeEffects.forEach(eff => {
+                if (eff.logic === 'double') {
+                    // Logic modifiers are consumed by everything that isn't a Buff/Stat
+                    eff.count--;
+                } else if (isArtifact) {
+                    // Spatial modifiers are only consumed by Weapons
+                    eff.count--;
+                }
+            });
+
             activeEffects = activeEffects.filter(eff => eff.count > 0);
             
             // Add new effects for the next iteration
@@ -637,6 +646,47 @@ export class GameEngine {
     fireArtifact(card: CardDef, activeEffects: ActiveEffect[], buffs: any) {
         if (!card.artifactConfig) return;
         const conf = card.artifactConfig;
+
+        // --- Jade Ruyi (Pull) Special Logic ---
+        if (card.id.startsWith('art_pull')) {
+             // 1. Visual Effect: Full screen rainbow flash
+             const flash = new Graphics();
+             // Simple rainbow gradient approx using stacked rects with multiply/add
+             flash.rect(0,0, SCREEN_WIDTH, SCREEN_HEIGHT).fill({color: 0xff00ff, alpha: 0.1});
+             flash.rect(0,0, SCREEN_WIDTH, SCREEN_HEIGHT).fill({color: 0x00ffff, alpha: 0.1});
+             flash.rect(0,0, SCREEN_WIDTH, SCREEN_HEIGHT).fill({color: 0xffff00, alpha: 0.1});
+             
+             // Flash white center
+             const cx = SCREEN_WIDTH/2;
+             const cy = SCREEN_HEIGHT/2;
+             flash.circle(cx, cy, 1000).fill({color: 0xffffff, alpha: 0.2});
+             flash.blendMode = 'add';
+             
+             this.app.stage.addChild(flash);
+             
+             // Animate Flash fade out
+             let alpha = 0.5;
+             const fade = (ticker: Ticker) => {
+                 alpha -= 0.02;
+                 flash.alpha = alpha;
+                 if (alpha <= 0) {
+                     this.app.ticker.remove(fade);
+                     flash.parent?.removeChild(flash);
+                 }
+             };
+             this.app.ticker.add(fade);
+
+             // 2. Logic: Magnetize all XP
+             let count = 0;
+             this.xpOrbs.forEach(orb => {
+                 orb.isMagnetized = true;
+                 count++;
+             });
+             
+             if (count > 0) this.spawnText("ABSORB!", this.player.x, this.player.y - 40, 0xff00ff);
+             
+             return; // Do not spawn a bullet
+        }
 
         // Persistent Weapon Logic: Orbit Sword
         if (conf.projectileType === 'orbit') {
@@ -763,7 +813,10 @@ export class GameEngine {
         }
 
         if (isBack) {
-            angles.forEach(a => angles.push(a + Math.PI)); // Add reverse shot for every shot
+            // Fix: Add backshots for ALL existing angles (e.g. Fan + Back = 5 forward, 5 back)
+            // Need to copy array first to avoid infinite loop
+            const currentAngles = [...angles];
+            currentAngles.forEach(a => angles.push(a + Math.PI)); 
         }
         
         angles.forEach(angle => {
@@ -868,7 +921,7 @@ export class GameEngine {
             b.rotation = Math.PI / 4; // Point outward initially
         }
         else if (ownerId.startsWith('art_track')) {
-            // PIXEL GLAIVE
+            // GLAIVE LOGIC
             // Pole
             g.rect(-1, -15, 2, 30).fill(0x334155); 
             // Blade
@@ -1125,9 +1178,13 @@ export class GameEngine {
             const dy = this.player.y - orb.y;
             const dist = Math.sqrt(dx*dx + dy*dy);
             
-            if (dist < this.stats.pickupRange) {
-                orb.x += (dx/dist) * 8 * delta;
-                orb.y += (dy/dist) * 8 * delta;
+            // Magnetized logic (Jade Ruyi) or normal range
+            if (orb.isMagnetized || dist < this.stats.pickupRange) {
+                // If magnetized, infinite range and faster speed
+                const speed = orb.isMagnetized ? 15 : 8;
+                
+                orb.x += (dx/dist) * speed * delta;
+                orb.y += (dy/dist) * speed * delta;
                 
                 if (dist < 10) {
                     this.stats.xp += orb.value;

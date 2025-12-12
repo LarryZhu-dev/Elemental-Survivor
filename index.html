@@ -201,7 +201,7 @@
         transform: scale(1.05) translateY(-5px); 
       }
 
-      /* Card Rarity Styles - Always Glowing */
+      /* Card Rarity Styles */
       /* Silver */
       .rarity-silver {
         border-color: #cbd5e1; /* slate-300 */
@@ -220,20 +220,25 @@
         box-shadow: 0 0 40px rgba(251, 191, 36, 1);
       }
 
-      /* Prismatic */
-      @keyframes rainbow-border {
-        0% { border-color: #ff0000; box-shadow: 0 0 20px rgba(255,0,0,0.5); }
-        17% { border-color: #ffff00; box-shadow: 0 0 20px rgba(255,255,0,0.5); }
-        33% { border-color: #00ff00; box-shadow: 0 0 20px rgba(0,255,0,0.5); }
-        50% { border-color: #00ffff; box-shadow: 0 0 20px rgba(0,255,255,0.5); }
-        67% { border-color: #0000ff; box-shadow: 0 0 20px rgba(0,0,255,0.5); }
-        83% { border-color: #ff00ff; box-shadow: 0 0 20px rgba(255,0,255,0.5); }
-        100% { border-color: #ff0000; box-shadow: 0 0 20px rgba(255,0,0,0.5); }
+      /* Prismatic - Holographic Oil Slick Effect */
+      @keyframes holographic-shift {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 200% 50%; }
       }
+      
       .rarity-prismatic {
-        border-color: #ff00ff;
-        animation: rainbow-border 3s linear infinite;
-        background: linear-gradient(135deg, #1e293b 0%, #311b36 100%);
+        border-color: transparent; /* Hide actual border */
+        /* Use background to simulate border */
+        background: 
+            linear-gradient(#1e293b, #311b36) padding-box,
+            linear-gradient(135deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000) border-box;
+        background-size: 200% 200%;
+        animation: holographic-shift 3s linear infinite;
+        box-shadow: 0 0 20px rgba(217, 70, 239, 0.6);
+      }
+      
+      .card.rarity-prismatic:hover {
+         box-shadow: 0 0 40px rgba(217, 70, 239, 1), 0 0 10px rgba(255, 255, 255, 0.5) inset;
       }
 
       .card-icon {
@@ -318,7 +323,15 @@
       /* Always show slight glow in inventory too */
       .inv-slot.rarity-silver { border-color: #cbd5e1; box-shadow: 0 0 8px rgba(203, 213, 225, 0.3); }
       .inv-slot.rarity-gold { border-color: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.3); }
-      .inv-slot.rarity-prismatic { border-color: #d946ef; animation: rainbow-border 3s linear infinite; }
+      .inv-slot.rarity-prismatic { 
+        border-color: transparent;
+        background: 
+            linear-gradient(#334155, #334155) padding-box,
+            linear-gradient(135deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000) border-box;
+        background-size: 200% 200%;
+        animation: holographic-shift 3s linear infinite;
+        box-shadow: 0 0 8px rgba(217, 70, 239, 0.4);
+      }
 
       .inv-slot:active { cursor: grabbing; }
       .inv-slot.muuri-item-dragging {
