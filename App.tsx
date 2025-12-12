@@ -71,6 +71,7 @@ const InventoryGrid = forwardRef(({ items, onHover }: InventoryGridProps, ref) =
                             className={`item-content rarity-${card.rarity}`}
                             onMouseEnter={() => onHover(card)}
                             onMouseLeave={() => onHover(null)}
+                            onTouchStart={() => onHover(card)}
                         >
                              {card.type === CardType.EFFECT && <div className="badge badge-effect">EF</div>}
                              {card.type === CardType.BUFF && <div className="badge badge-buff">BF</div>}
@@ -86,6 +87,77 @@ const InventoryGrid = forwardRef(({ items, onHover }: InventoryGridProps, ref) =
         </div>
     );
 });
+
+const Joystick = ({ onMove }: { onMove: (x: number, y: number) => void }) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const knobRef = useRef<HTMLDivElement>(null);
+    const touchIdRef = useRef<number | null>(null);
+
+    const handleStart = (e: React.TouchEvent) => {
+        const touch = e.changedTouches[0];
+        touchIdRef.current = touch.identifier;
+        updateJoystick(touch.clientX, touch.clientY);
+    };
+
+    const handleMove = (e: React.TouchEvent) => {
+        const touch = Array.from(e.changedTouches).find(t => t.identifier === touchIdRef.current);
+        if (touch) {
+            updateJoystick(touch.clientX, touch.clientY);
+        }
+    };
+
+    const handleEnd = (e: React.TouchEvent) => {
+        const touch = Array.from(e.changedTouches).find(t => t.identifier === touchIdRef.current);
+        if (touch) {
+            touchIdRef.current = null;
+            resetJoystick();
+        }
+    };
+
+    const updateJoystick = (clientX: number, clientY: number) => {
+        if (!containerRef.current || !knobRef.current) return;
+        const rect = containerRef.current.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        
+        const maxDist = rect.width / 2;
+        
+        let dx = clientX - centerX;
+        let dy = clientY - centerY;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        // Clamp
+        if (dist > maxDist) {
+            dx = (dx / dist) * maxDist;
+            dy = (dy / dist) * maxDist;
+        }
+        
+        // Move knob visually
+        knobRef.current.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        
+        // Normalize output -1 to 1
+        onMove(dx / maxDist, dy / maxDist);
+    };
+
+    const resetJoystick = () => {
+        if (!knobRef.current) return;
+        knobRef.current.style.transform = `translate(-50%, -50%)`;
+        onMove(0, 0);
+    };
+
+    return (
+        <div 
+            className="joystick-container"
+            ref={containerRef}
+            onTouchStart={handleStart}
+            onTouchMove={handleMove}
+            onTouchEnd={handleEnd}
+            onTouchCancel={handleEnd}
+        >
+            <div className="joystick-knob" ref={knobRef} />
+        </div>
+    );
+};
 
 
 const App = () => {
@@ -215,13 +287,25 @@ const App = () => {
       setHoveredCard(null);
   };
 
+  const handleJoystickMove = (x: number, y: number) => {
+      if (engineRef.current) {
+          engineRef.current.setJoystick(x, y);
+      }
+  };
+
+  const handlePause = () => {
+      if (gameState === GameState.PLAYING) {
+          setGameState(GameState.PAUSED);
+      }
+  };
+
   return (
     <div className="app-container">
       <canvas ref={canvasRef} className="absolute inset-0" />
 
       {/* --- MENU --- */}
       {gameState === GameState.MENU && (
-        <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-6">
+        <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-6 z-50">
           <h1 className="menu-title mb-8">元素幸存者</h1>
           <div className="flex flex-col gap-4">
             <button 
@@ -232,16 +316,16 @@ const App = () => {
             </button>
           </div>
           <div className="instructions mt-8 text-center">
-            点击地面移动. 默认自动攻击最近敌人.<br/>
+            点击地面或使用摇杆移动.<br/>
             按 [A] 键切换手动/自动瞄准.<br/>
-            Esc 暂停/整理背包.<br/>
-            (在控制台输入 gm() 开启调试模式)
+            Esc/右上角按钮 暂停整理背包.<br/>
           </div>
         </div>
       )}
 
       {/* --- HUD --- */}
       {(gameState === GameState.PLAYING || gameState === GameState.PRE_LEVEL_UP) && stats && (
+        <>
         <div className="absolute inset-0 pointer-events-none p-4">
            {/* Aim Status */}
            <div className="aim-status">
@@ -280,6 +364,14 @@ const App = () => {
              </div>
            </div>
         </div>
+
+        {/* Mobile Controls */}
+        <Joystick onMove={handleJoystickMove} />
+        
+        <button className="pause-btn" onClick={handlePause}>
+             ||
+        </button>
+        </>
       )}
 
       {/* --- GM PANEL --- */}
@@ -321,7 +413,7 @@ const App = () => {
 
       {/* --- BOSS WARNING --- */}
       {bossWarning && (
-         <div className="absolute inset-0 flex items-center justify-center pointer-events-none boss-overlay">
+         <div className="absolute inset-0 flex items-center justify-center pointer-events-none boss-overlay z-50">
             <div className="boss-text">
                警告: {bossWarning}
             </div>
@@ -332,7 +424,7 @@ const App = () => {
       {gameState === GameState.LEVEL_UP && (
         <div className="absolute inset-0 overlay-darker flex flex-col items-center justify-center z-50">
           <h2 className="levelup-title mb-8">等级提升!</h2>
-          <div className="flex gap-4">
+          <div className="flex gap-4 flex-wrap justify-center">
             {levelUpOptions.map((card, i) => (
               <div 
                 key={i}
@@ -354,10 +446,10 @@ const App = () => {
       {/* --- PAUSE / INVENTORY --- */}
       {gameState === GameState.PAUSED && stats && (
          <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
-           <h2 className="pause-title mb-4">法术链调整 (Grid Layout)</h2>
+           <h2 className="pause-title mb-4">法术链调整</h2>
            <p className="pause-desc mb-4">
-             法术触发顺序：从左到右，从上到下。<br/>
-             请将 Buff 和 Effect 放在核心法器 (ART) 之前。
+             拖动整理 (左到右, 上到下顺序触发)<br/>
+             Buff/Effect 应放在 Artifact 之前
            </p>
            
            <div className="pause-layout">
@@ -376,8 +468,8 @@ const App = () => {
                            <div className="details-desc">{hoveredCard.description}</div>
                        </>
                    ) : (
-                       <div className="text-gray-500 italic flex h-full items-center justify-center">
-                            将鼠标悬停在卡片上查看详情。<br/>
+                       <div className="text-gray-500 italic flex h-full items-center justify-center text-center p-4">
+                            触摸/悬停卡片查看详情。<br/>
                             拖动卡片以排序。
                        </div>
                    )}

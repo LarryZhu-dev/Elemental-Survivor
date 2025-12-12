@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Elemental Survivor</title>
     <style>
       /* --- Base Reset & Defaults --- */
@@ -14,6 +14,7 @@
         font-family: 'Courier New', Courier, monospace; 
         user-select: none;
         color: white;
+        touch-action: none; /* Critical for mobile game controls */
       }
       canvas {
         display: block;
@@ -77,6 +78,7 @@
         color: #22d3ee; /* cyan-400 */
         text-shadow: 0 4px 0 rgba(0,0,0,1);
         font-weight: bold;
+        text-align: center;
       }
       .btn {
         padding: 1rem 2rem;
@@ -109,6 +111,7 @@
         width: 16rem;
         background-color: #1f2937; /* gray-800 */
         border: 2px solid white;
+        max-width: 40vw; /* Responsive bar width */
       }
       .bar-hp { top: 1rem; left: 1rem; height: 1.5rem; }
       .bar-xp { top: 3rem; left: 1rem; height: 1rem; }
@@ -133,10 +136,13 @@
       .lvl-text {
         position: absolute;
         top: 3rem;
-        left: 290px;
+        left: 18rem; /* Adjusted for responsive */
         color: #facc15; /* yellow-400 */
         font-weight: bold;
         font-size: 1.25rem; /* xl */
+      }
+      @media (max-width: 600px) {
+          .lvl-text { left: 45vw; font-size: 1rem; }
       }
 
       .aim-status {
@@ -148,12 +154,13 @@
         border: 1px solid #0891b2;
         background: rgba(0,0,0,0.5);
         padding: 4px 8px;
+        pointer-events: auto; /* Allow clicking */
       }
 
       .wave-info {
         position: absolute;
         top: 1rem;
-        right: 1rem;
+        right: 4rem; /* Moved left to make room for pause button */
         text-align: right;
       }
       .wave-title {
@@ -164,6 +171,50 @@
       .wave-timer {
         font-size: 0.875rem; /* sm */
         color: #9ca3af; /* gray-400 */
+      }
+
+      /* Mobile Controls */
+      .joystick-container {
+        position: absolute;
+        bottom: 50px;
+        left: 40px;
+        width: 120px;
+        height: 120px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        touch-action: none;
+        z-index: 50;
+      }
+      .joystick-knob {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 50px;
+        height: 50px;
+        background: rgba(255, 255, 255, 0.5);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      
+      .pause-btn {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        width: 2.5rem;
+        height: 2.5rem;
+        background: rgba(0,0,0,0.5);
+        border: 2px solid white;
+        border-radius: 8px;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        cursor: pointer;
+        z-index: 50;
+        pointer-events: auto;
       }
 
       /* Boss Warning */
@@ -179,6 +230,10 @@
         padding: 1rem 3rem;
         background-color: rgba(0,0,0,0.5);
         animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        text-align: center;
+      }
+      @media (max-width: 600px) {
+          .boss-text { font-size: 2rem; padding: 1rem; }
       }
       @keyframes pulse {
         0%, 100% { opacity: 1; }
@@ -205,6 +260,12 @@
         box-sizing: border-box;
         border-style: solid;
         border-width: 6px;
+      }
+      @media (max-width: 800px) {
+          .card { width: 30vw; height: auto; min-height: 180px; padding: 0.5rem; }
+          .card-icon { height: 3rem; font-size: 1.5rem; margin-bottom: 0.5rem; }
+          .card-name { font-size: 0.8rem; }
+          .card-desc { font-size: 0.6rem; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
       }
       
       .card:hover { 
@@ -301,11 +362,15 @@
         width: 100%;
         justify-content: center;
       }
+      @media (max-width: 800px) {
+          .pause-layout { flex-direction: column; align-items: center; gap: 1rem; }
+      }
       
       /* Muuri Grid Styles */
       .grid-container-wrapper {
-        width: 600px;
-        height: 500px;
+        width: 90vw;
+        max-width: 600px;
+        height: 60vh; /* Fixed height for scrolling */
         background: rgba(0,0,0,0.3);
         border: 2px solid #333;
         border-radius: 8px;
@@ -316,7 +381,6 @@
       .grid {
         position: relative;
         width: 100%;
-        /* Min height to allow dropping into empty list if needed */
         min-height: 400px; 
       }
       
@@ -328,6 +392,10 @@
         margin: 8px;
         z-index: 1;
         cursor: grab;
+        touch-action: none; /* REQUIRED FOR MOBILE DRAG */
+      }
+      @media (max-width: 600px) {
+          .item { width: 60px; height: 60px; margin: 5px; }
       }
       
       .item:active {
@@ -394,6 +462,9 @@
         flex-direction: column;
         color: white;
       }
+      @media (max-width: 800px) {
+          .details-panel { width: 90vw; height: auto; min-height: 150px; }
+      }
       .details-title { font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem; }
       .details-type { color: #9ca3af; font-size: 0.875rem; margin-bottom: 1rem; text-transform: uppercase; }
       .details-desc { font-size: 1rem; line-height: 1.4; color: #d1d5db; }
@@ -454,6 +525,9 @@
         flex-direction: column;
         overflow-y: auto;
         box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+      }
+      @media (max-width: 600px) {
+          .gm-panel { width: 95vw; left: 2.5vw; top: 1rem; }
       }
       .gm-header {
         font-size: 1.25rem;

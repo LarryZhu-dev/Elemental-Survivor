@@ -158,6 +158,7 @@ export class GameEngine {
     // Input
     mouse: { x: number, y: number } = { x: 0, y: 0 };
     isAutoAim: boolean = true;
+    joystickInput: { x: number, y: number } = { x: 0, y: 0 };
     
     // Performance
     damageTextCooldown: number = 0;
@@ -367,6 +368,10 @@ export class GameEngine {
         }
     }
 
+    setJoystick(x: number, y: number) {
+        this.joystickInput = { x, y };
+    }
+
     handleKeyDown = (e: KeyboardEvent) => {
         if (e.code === 'Escape') {
             if (this.state === GameState.PLAYING) {
@@ -391,6 +396,9 @@ export class GameEngine {
     handleMouseDown = (e: MouseEvent) => {
         if (this.state !== GameState.PLAYING) return;
         
+        // Don't process tap-to-move if joystick is active
+        if (this.joystickInput.x !== 0 || this.joystickInput.y !== 0) return;
+
         const worldX = (e.clientX - SCREEN_WIDTH/2) + this.player.x;
         const worldY = (e.clientY - SCREEN_HEIGHT/2) + this.player.y;
         
@@ -486,13 +494,21 @@ export class GameEngine {
             this.player.alpha = 1;
         }
 
-        if (this.player.moveTarget) {
+        // Joystick Logic (Prioritized)
+        if (this.joystickInput.x !== 0 || this.joystickInput.y !== 0) {
+            const speed = 4 * delta * (this.stats.speed / 5); 
+            this.player.x += this.joystickInput.x * speed;
+            this.player.y += this.joystickInput.y * speed;
+            this.player.moveTarget = undefined; // Cancel tap-to-move if using joystick
+        } 
+        // Tap to Move Logic
+        else if (this.player.moveTarget) {
             const dx = this.player.moveTarget.x - this.player.x;
             const dy = this.player.moveTarget.y - this.player.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             if (dist > 5) {
-                const speed = 4 * delta; 
+                const speed = 4 * delta * (this.stats.speed / 5); 
                 this.player.x += (dx / dist) * speed;
                 this.player.y += (dy / dist) * speed;
             } else {
