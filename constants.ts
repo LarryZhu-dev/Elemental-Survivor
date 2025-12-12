@@ -41,9 +41,9 @@ export const ARTIFACT_CARDS: CardDef[] = [
     artifactConfig: { cooldown: 250, baseDamage: 0, element: ElementType.WIND, projectileType: 'area', color: 0xccffcc }
   },
   { 
-    id: 'art_water', name: '白玉神盂', description: '喷射水流击退敌人，扑灭火焰', 
+    id: 'art_water', name: '白玉神盂', description: '倾倒出一条强力河流', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#00bfff', 
-    artifactConfig: { cooldown: 40, baseDamage: 5, element: ElementType.WATER, projectileType: 'beam', color: 0x00bfff }
+    artifactConfig: { cooldown: 5, baseDamage: 2, element: ElementType.WATER, projectileType: 'stream', color: 0x00bfff }
   },
   { 
     id: 'art_pull', name: '碧玉瑶光如意', description: '全屏彩光，吸附经验', 
@@ -89,6 +89,9 @@ export const EFFECT_CARDS: CardDef[] = [
   { id: 'eff_split_s', name: '回马枪', description: '增加向后发射', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'split_back', influenceCount: 1 } },
   { id: 'eff_fan_p', name: '万箭齐发', description: '变为扇形发射 (范围3)', type: CardType.EFFECT, rarity: Rarity.PRISMATIC, iconColor: COLORS.RARITY_PRISMATIC, effectConfig: { logic: 'fan', influenceCount: 3 } },
   { id: 'eff_track_g', name: '御物术', description: '赋予追踪能力 (范围2)', type: CardType.EFFECT, rarity: Rarity.GOLD, iconColor: COLORS.RARITY_GOLD, effectConfig: { logic: 'track', influenceCount: 2 } },
+  // NEW EARLY GAME EFFECTS
+  { id: 'eff_wobble_s', name: '乱舞', description: '弹道变为波浪形', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'wobble', influenceCount: 1 } },
+  { id: 'eff_giant_s', name: '巨大化', description: '体积变大，伤害提升', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'giant', influenceCount: 1 } },
 ];
 
 // 4. Buffs (Stat modifiers for next artifact)
@@ -132,7 +135,8 @@ export const getRandomCard = (wave: number, currentInventory: CardDef[] = [], ex
     // Fallback
     let finalPool = pool;
     if (finalPool.length === 0) {
-        finalPool = STAT_CARDS.filter(c => !excludeList.some(ex => ex.name === c.name)); 
+        // If we ran out of cards for this rarity, fallback to ANY card of that rarity, or Stat cards
+         finalPool = STAT_CARDS.filter(c => !excludeList.some(ex => ex.name === c.name)); 
         if (finalPool.length === 0) finalPool = STAT_CARDS;
     }
 

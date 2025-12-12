@@ -51,7 +51,7 @@ export interface CardDef {
     cooldown: number;
     baseDamage: number;
     element: ElementType;
-    projectileType: 'projectile' | 'beam' | 'area' | 'orbit' | 'lightning';
+    projectileType: 'projectile' | 'beam' | 'area' | 'orbit' | 'lightning' | 'stream';
     color: number;
   };
   buffConfig?: {
@@ -60,7 +60,7 @@ export interface CardDef {
     frequency?: number; // Inverse cooldown
   };
   effectConfig?: {
-    logic: 'split_back' | 'reverse' | 'double' | 'ignore' | 'ring' | 'fan' | 'line' | 'track' | 'copy';
+    logic: 'split_back' | 'reverse' | 'double' | 'ignore' | 'ring' | 'fan' | 'line' | 'track' | 'copy' | 'wobble' | 'giant';
     influenceCount: number; // Silver=1, Gold=2, Prismatic=3
   };
 }

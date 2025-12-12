@@ -5,17 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Elemental Survivor</title>
     <style>
-      @font-face {
-        font-family: 'PixelFont';
-        src: url('https://cdn.jsdelivr.net/fontsource/fonts/fusion-pixel-12px-proportional-tc@latest/latin-400-normal.woff2') format('woff2');
-      }
-
       /* --- Base Reset & Defaults --- */
       body {
         margin: 0;
         overflow: hidden;
         background-color: #1a1a1a;
-        font-family: 'PixelFont', sans-serif;
+        /* Use system monospace for instant loading and pixel-art feel */
+        font-family: 'Courier New', Courier, monospace; 
         user-select: none;
         color: white;
       }
@@ -75,6 +71,7 @@
         line-height: 1;
         color: #22d3ee; /* cyan-400 */
         text-shadow: 0 4px 0 rgba(0,0,0,1);
+        font-weight: bold;
       }
       .btn {
         padding: 1rem 2rem;
@@ -84,6 +81,8 @@
         background-color: #374151; /* gray-700 */
         color: white;
         transition: background-color 0.2s;
+        font-family: inherit;
+        font-weight: bold;
       }
       .btn:hover { background-color: #4b5563; /* gray-600 */ }
       .btn-fixed { border-color: white; }
@@ -119,6 +118,7 @@
         justify-content: center;
         font-size: 0.75rem; /* xs */
         text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        font-weight: bold;
       }
       
       .lvl-text {
@@ -150,6 +150,7 @@
       .wave-title {
         font-size: 1.5rem; /* 2xl */
         color: #f87171; /* red-400 */
+        font-weight: bold;
       }
       .wave-timer {
         font-size: 0.875rem; /* sm */

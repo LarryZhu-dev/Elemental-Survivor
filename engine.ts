@@ -46,6 +46,10 @@ type Bullet = Container & {
     state?: string; // For Glaive: 'IDLE', 'SEEK', 'RETURN'
     target?: Entity | null;
     orbitAngle?: number;
+    
+    // Logic modifiers
+    isWobble?: boolean;
+    wobblePhase?: number;
 }
 
 type Particle = Graphics & {
@@ -358,7 +362,10 @@ export class GameEngine {
         marker.x = worldX;
         marker.y = worldY;
         this.world.addChild(marker);
-        setTimeout(() => marker.parent?.removeChild(marker), 300);
+        setTimeout(() => {
+            marker.parent?.removeChild(marker);
+            marker.destroy(); // Memory Fix
+        }, 300);
     }
 
     update(ticker: Ticker) {
@@ -557,12 +564,6 @@ export class GameEngine {
         let activeEffects: ActiveEffect[] = [];
         let buffStats = { rangeMult: 1, speedMult: 1, freqMult: 1 };
         
-        // We iterate through the inventory.
-        // Updated Logic for Stacking:
-        // Logic modifiers (e.g., Double) affect the next card regardless of type, so they are consumed by Effects AND Artifacts.
-        // Spatial modifiers (e.g., Split/Fan) usually only make sense for Artifacts. They should persist through intermediate Effect cards
-        // so you can have [Split] -> [Double] -> [Weapon] and the weapon gets Split + Double.
-
         for (const card of this.stats.inventory) {
             // Cooldown Reduction Buffs
             if (card.type === CardType.BUFF && card.buffConfig) {
@@ -598,20 +599,20 @@ export class GameEngine {
 
                 // Persistent weapons logic check
                 if (card.artifactConfig.projectileType === 'orbit' || (card.id.includes('art_track') && card.artifactConfig.projectileType !== 'beam')) {
-                    this.fireArtifact(card, activeEffects, buffStats);
+                    this.fireArtifact(card, activeEffects, buffStats, 0);
                 } 
                 else if (this.weaponCooldowns[card.id] <= 0) {
                     // Standard trigger
                     for(let i=0; i<executionCount; i++) {
                          if (i === 0) {
-                             this.fireArtifact(card, activeEffects, buffStats);
+                             this.fireArtifact(card, activeEffects, buffStats, i);
                          } else {
                              // Stagger subsequent triggers more visibly
                              // Use a closure to capture the current state of effects
                              const capturedEffects = [...activeEffects.map(e => ({...e}))]; 
                              this.delayedActions.push({
                                  timer: i * 8, // 8 frames delay per double
-                                 action: () => this.fireArtifact(card, capturedEffects, buffStats)
+                                 action: () => this.fireArtifact(card, capturedEffects, buffStats, i)
                              });
                          }
                     }
@@ -643,7 +644,7 @@ export class GameEngine {
         }
     }
 
-    fireArtifact(card: CardDef, activeEffects: ActiveEffect[], buffs: any) {
+    fireArtifact(card: CardDef, activeEffects: ActiveEffect[], buffs: any, dupeIndex: number = 0) {
         if (!card.artifactConfig) return;
         const conf = card.artifactConfig;
 
@@ -672,6 +673,7 @@ export class GameEngine {
                  if (alpha <= 0) {
                      this.app.ticker.remove(fade);
                      flash.parent?.removeChild(flash);
+                     flash.destroy(); // Memory Fix
                  }
              };
              this.app.ticker.add(fade);
@@ -689,15 +691,19 @@ export class GameEngine {
         }
 
         // Persistent Weapon Logic: Orbit Sword
+        // Fix for Double Cast: We simply check if we have enough instances.
         if (conf.projectileType === 'orbit') {
-            const alreadyActive = this.bullets.some(b => b.ownerId === card.id && !b.isDead);
-            if (alreadyActive) return; // Only spawn one
+            const activeInstances = this.bullets.filter(b => b.ownerId === card.id && !b.isDead).length;
+            // Allow duplicates logic: If dupeIndex is 1, and we have < 2 swords, spawn one.
+            // Simplified: If activeInstances <= dupeIndex, spawn.
+            if (activeInstances > dupeIndex) return;
         }
 
         // Persistent Weapon Logic: Tracking Glaive
+        // Fix for Double Cast: Allow multiple glaives
         if (card.id.startsWith('art_track')) {
-             const alreadyActive = this.bullets.some(b => b.ownerId === card.id && !b.isDead);
-             if (alreadyActive) return;
+             const activeInstances = this.bullets.filter(b => b.ownerId === card.id && !b.isDead).length;
+             if (activeInstances > dupeIndex) return;
         }
 
         // Aggregate Logic Modifiers
@@ -705,13 +711,20 @@ export class GameEngine {
         let isRing = false;
         let isBack = false;
         let track = false;
+        let wobble = false;
+        let giant = false;
         
         activeEffects.forEach(m => {
             if (m.logic === 'split_back') isBack = true;
             if (m.logic === 'fan') isFan = true;
             if (m.logic === 'ring') isRing = true;
             if (m.logic === 'track') track = true;
+            if (m.logic === 'wobble') wobble = true;
+            if (m.logic === 'giant') giant = true;
         });
+        
+        // Pass Logic flags to buffs object to keep createBullet clean, or just use boolean args
+        const flags = { track, wobble, giant };
 
         // --- Lightning Instant Logic ---
         if (conf.element === ElementType.LIGHTNING) {
@@ -761,7 +774,7 @@ export class GameEngine {
             
             // Deal Damage
             targetsHit.forEach(e => {
-                 const dmg = conf.baseDamage * this.stats.damageMultiplier;
+                 const dmg = conf.baseDamage * this.stats.damageMultiplier * (giant ? 1.5 : 1);
                  e.hp -= dmg;
                  e.isElectrified = true;
                  this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffff00);
@@ -820,7 +833,7 @@ export class GameEngine {
         }
         
         angles.forEach(angle => {
-            this.createBullet(conf, angle, buffs, track, card.id);
+            this.createBullet(conf, angle, buffs, flags, card.id, dupeIndex);
         });
     }
 
@@ -867,12 +880,14 @@ export class GameEngine {
                 this.app.ticker.remove(fade);
                 g.parent?.removeChild(g);
                 glow.parent?.removeChild(glow);
+                g.destroy(); // Memory Fix
+                glow.destroy();
             }
         }
         this.app.ticker.add(fade);
     }
 
-    createBullet(conf: any, angle: number, buffs: any, tracking: boolean, ownerId: string) {
+    createBullet(conf: any, angle: number, buffs: any, flags: {track: boolean, wobble: boolean, giant: boolean}, ownerId: string, dupeIndex: number) {
         const b = new Container() as Bullet;
         const g = new Graphics();
         
@@ -880,6 +895,10 @@ export class GameEngine {
         let life = 180 * buffs.rangeMult; 
         let radius = 12;
         let isPersistent = false;
+        
+        if (flags.giant) {
+            b.scale.set(1.5);
+        }
 
         if (conf.element === ElementType.WIND) {
              // Wind Shockwave Visual
@@ -897,12 +916,26 @@ export class GameEngine {
 
              g.blendMode = 'add';
              life = 30; // Short duration
-             speed = 0; // Moves with player or stationary? Wind bag usually pushes away from player
-             // Actually let's make it expand.
-             
-             // We'll animate scale in updateBullets
+             speed = 0; 
              b.scale.set(0.1); 
         } 
+        else if (conf.projectileType === 'stream') {
+             // RIVER / STREAM LOGIC
+             // Start small, grows rapidly.
+             const r = 8;
+             radius = r;
+             g.circle(0,0, r).fill(conf.color);
+             g.circle(0,0, r * 0.7).fill(0xffffff);
+             
+             speed = 6 * buffs.speedMult;
+             life = 40 * buffs.rangeMult;
+             
+             // Add a tail or distortion
+             b.scale.set(0.2); // Start tiny
+             
+             // Random spread
+             angle += (Math.random() - 0.5) * 0.2;
+        }
         else if (conf.projectileType === 'orbit') {
             // PIXEL SWORD
             // Blade
@@ -917,7 +950,7 @@ export class GameEngine {
             speed = 0;
             life = 999999;
             isPersistent = true;
-            b.orbitAngle = 0;
+            b.orbitAngle = 0 + (dupeIndex * (Math.PI / 2)); // Offset duplicates
             b.rotation = Math.PI / 4; // Point outward initially
         }
         else if (ownerId.startsWith('art_track')) {
@@ -937,6 +970,7 @@ export class GameEngine {
             life = 999999;
             isPersistent = true;
             b.state = 'IDLE';
+            b.orbitAngle = dupeIndex * (Math.PI); // Offset duplicates
         }
         else if (conf.projectileType === 'projectile') {
             g.circle(0,0, 4).fill(0xffffff); 
@@ -966,16 +1000,18 @@ export class GameEngine {
         b.vy = Math.sin(angle) * speed;
         b.rotation = angle;
         
-        b.damage = conf.baseDamage * this.stats.damageMultiplier;
+        b.damage = conf.baseDamage * this.stats.damageMultiplier * (flags.giant ? 1.5 : 1);
         b.element = conf.element;
         b.duration = life;
         b.radius = radius;
         b.ownerId = ownerId;
         b.isDead = false;
-        b.isTracking = tracking;
+        b.isTracking = flags.track;
+        b.isWobble = flags.wobble;
+        b.wobblePhase = Math.random() * 10;
         b.hitList = new Set();
         // Persistent weapons have infinite pierce usually, or controlled by logic
-        b.pierce = (conf.projectileType === 'area' || isPersistent || conf.element === ElementType.WIND) ? 999 : 1;
+        b.pierce = (conf.projectileType === 'area' || isPersistent || conf.element === ElementType.WIND || conf.projectileType === 'stream') ? 999 : 1;
         b.color = conf.color;
         b.trailTimer = 0;
 
@@ -1040,16 +1076,25 @@ export class GameEngine {
                 if (b.alpha <= 0) {
                     b.isDead = true;
                     b.parent?.removeChild(b);
+                    b.destroy({ children: true }); // Memory Fix
                 }
                 b.duration -= delta;
                 return; // Custom logic done, skip standard movement
             }
 
+            // --- Stream Expansion (Water) ---
+            if (b.element === ElementType.WATER && b.scale.x < 3) {
+                 b.scale.x += 0.1 * delta;
+                 b.scale.y += 0.1 * delta;
+                 b.alpha -= 0.02 * delta;
+            }
+
             b.duration -= delta;
             
-            if (b.duration <= 0) {
+            if (b.duration <= 0 || b.alpha <= 0) {
                 b.isDead = true;
                 b.parent?.removeChild(b);
+                b.destroy({ children: true }); // Memory Fix
                 return;
             }
 
@@ -1058,7 +1103,10 @@ export class GameEngine {
                 if (b.trailTimer <= 0) {
                     // Don't spawn trails for invisible orbiters or large areas
                     if (!b.ownerId.startsWith('art_sword') && !b.ownerId.startsWith('art_track')) {
-                       this.spawnParticle(b.x, b.y, b.color, 1);
+                       // Lower particle count for stream to save perf
+                       if (b.element !== ElementType.WATER || Math.random() > 0.7) {
+                          this.spawnParticle(b.x, b.y, b.color, 1);
+                       }
                     }
                     b.trailTimer = 3; 
                 }
@@ -1147,6 +1195,24 @@ export class GameEngine {
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
             } else {
+                // --- Wobble Logic ---
+                if (b.isWobble) {
+                    if (b.wobblePhase === undefined) b.wobblePhase = 0;
+                    b.wobblePhase += 0.2 * delta;
+                    
+                    // Calculate Perpendicular Vector
+                    const len = Math.hypot(b.vx, b.vy);
+                    if (len > 0) {
+                        const px = -b.vy / len;
+                        const py = b.vx / len;
+                        const offset = Math.sin(b.wobblePhase) * 2 * delta;
+                        
+                        b.x += b.vx * delta + px * offset;
+                        b.y += b.vy * delta + py * offset;
+                        return; // Handled move
+                    }
+                }
+
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
             }
@@ -1167,6 +1233,7 @@ export class GameEngine {
             
             if (p.life <= 0 || p.alpha <= 0) {
                 p.parent?.removeChild(p);
+                p.destroy(); // Memory Fix
             }
         });
         this.particles = this.particles.filter(p => p.life > 0 && p.alpha > 0);
@@ -1189,6 +1256,7 @@ export class GameEngine {
                 if (dist < 10) {
                     this.stats.xp += orb.value;
                     orb.parent?.removeChild(orb);
+                    orb.destroy(); // Memory Fix
                     if (this.stats.xp >= this.stats.nextLevelXp) {
                         this.startLevelUpSequence();
                     }
@@ -1229,7 +1297,7 @@ export class GameEngine {
                 // For wind, checking collision is slightly different (radius based, visual scale matches hitbox)
                 // b.radius is updated in create, but wind scales.
                 let hitRadius = b.radius;
-                if (b.element === ElementType.WIND) hitRadius *= b.scale.x; 
+                if (b.element === ElementType.WIND || b.element === ElementType.WATER) hitRadius *= b.scale.x; 
 
                 const dx = b.x - e.x;
                 const dy = b.y - e.y;
@@ -1243,6 +1311,7 @@ export class GameEngine {
                     if (b.pierce <= 0) {
                         b.isDead = true;
                         b.parent?.removeChild(b);
+                        b.destroy({ children: true }); // Memory Fix
                         break; 
                     }
                 }
@@ -1328,7 +1397,10 @@ export class GameEngine {
                 g.lineTo(target.x, target.y);
                 g.stroke({ width: 2, color: 0xffff00 }); 
                 this.world.addChild(g);
-                setTimeout(() => g.parent?.removeChild(g), 100);
+                setTimeout(() => {
+                    g.parent?.removeChild(g);
+                    g.destroy(); // Memory fix
+                }, 100);
             }
         });
     }
@@ -1336,6 +1408,7 @@ export class GameEngine {
     killEnemy(e: Entity) {
         e.isDead = true;
         this.world.removeChild(e);
+        e.destroy({ children: true }); // Memory Fix
         
         const orb = new Graphics() as XPOrb;
         let color = 0x888888;
@@ -1387,11 +1460,12 @@ export class GameEngine {
         const t = new Text({
             text: text,
             style: {
-                fontFamily: 'PixelFont',
+                fontFamily: 'Courier New', // Faster font
                 fontSize: 14,
                 fill: color,
                 stroke: { color: 0x000000, width: 2 },
-                align: 'center'
+                align: 'center',
+                fontWeight: 'bold'
             }
         });
         t.x = x;
@@ -1405,6 +1479,7 @@ export class GameEngine {
             if (tick > 50) {
                 this.app.ticker.remove(anim);
                 t.parent?.removeChild(t);
+                t.destroy(); // Memory fix
             }
         };
         this.app.ticker.add(anim);
