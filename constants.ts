@@ -1,3 +1,4 @@
+
 import { CardDef, CardType, ElementType, Rarity } from './types';
 
 export const SCREEN_WIDTH = window.innerWidth;
@@ -41,9 +42,9 @@ export const ARTIFACT_CARDS: CardDef[] = [
     artifactConfig: { cooldown: 250, baseDamage: 0, element: ElementType.WIND, projectileType: 'area', color: 0xccffcc }
   },
   { 
-    id: 'art_water', name: '白玉神盂', description: '倾倒出一条强力河流', 
+    id: 'art_water', name: '白玉神盂', description: '倾倒出蜿蜒的河流冲刷敌人', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#00bfff', 
-    artifactConfig: { cooldown: 5, baseDamage: 2, element: ElementType.WATER, projectileType: 'stream', color: 0x00bfff }
+    artifactConfig: { cooldown: 15, baseDamage: 4, element: ElementType.WATER, projectileType: 'water_snake', color: 0x00bfff }
   },
   { 
     id: 'art_pull', name: '碧玉瑶光如意', description: '全屏彩光，吸附经验', 
@@ -51,47 +52,31 @@ export const ARTIFACT_CARDS: CardDef[] = [
     artifactConfig: { cooldown: 600, baseDamage: 0, element: ElementType.PHYSICAL, projectileType: 'area', color: 0xff00ff }
   },
   { 
-    id: 'art_sword_orbit', name: '九天玄女剑', description: '永久存在的守护仙剑', 
-    type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#ffffff', 
-    artifactConfig: { cooldown: 60, baseDamage: 10, element: ElementType.PHYSICAL, projectileType: 'orbit', color: 0xffffff }
-  },
-  { 
     id: 'art_track', name: '三尖两刃刀', description: '显化二郎真君神兵，自动斩妖除魔', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#dddddd', 
     artifactConfig: { cooldown: 30, baseDamage: 20, element: ElementType.PHYSICAL, projectileType: 'minion', color: 0xcccccc }
-  },
-  { 
-    id: 'art_nuke', name: '断魔雄剑', description: '随机位置天降巨剑', 
-    type: CardType.ARTIFACT, rarity: Rarity.PRISMATIC, iconColor: '#333333', 
-    artifactConfig: { cooldown: 120, baseDamage: 50, element: ElementType.PHYSICAL, projectileType: 'area', color: 0x000000 }
-  },
-  { 
-    id: 'art_light', name: '闪电神镜', description: '瞬发连锁闪电', 
-    type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#ffff00', 
-    artifactConfig: { cooldown: 50, baseDamage: 25, element: ElementType.LIGHTNING, projectileType: 'lightning', color: 0xffff00 }
   },
   { 
     id: 'art_light_combo', name: '雷公楔', description: '瞬发强力连锁闪电', 
     type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#cccc00', 
     artifactConfig: { cooldown: 45, baseDamage: 30, element: ElementType.LIGHTNING, projectileType: 'lightning', color: 0xffd700 }
   },
-  { 
-    id: 'art_hammer', name: '雷公锤', description: '增加雷公楔的威力和范围', 
-    type: CardType.ARTIFACT, rarity: Rarity.SILVER, iconColor: '#a9a9a9', 
-    artifactConfig: { cooldown: 9999, baseDamage: 0, element: ElementType.PHYSICAL, projectileType: 'projectile', color: 0x808080 }
-  },
 ];
 
 // 3. Effects (The Logic Changers)
 export const EFFECT_CARDS: CardDef[] = [
-  { id: 'eff_double_s', name: '双重触发', description: '下一张卡片逻辑触发两次', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'double', influenceCount: 1 } },
+  // Removed Silver Double, kept Gold (renamed to standard Double/Multi)
   { id: 'eff_double_g', name: '多重触发', description: '下两张卡片逻辑触发两次', type: CardType.EFFECT, rarity: Rarity.GOLD, iconColor: COLORS.RARITY_GOLD, effectConfig: { logic: 'double', influenceCount: 2 } },
+  
   { id: 'eff_split_s', name: '回马枪', description: '增加向后发射', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'split_back', influenceCount: 1 } },
   { id: 'eff_fan_p', name: '万箭齐发', description: '变为扇形发射 (范围3)', type: CardType.EFFECT, rarity: Rarity.PRISMATIC, iconColor: COLORS.RARITY_PRISMATIC, effectConfig: { logic: 'fan', influenceCount: 3 } },
   { id: 'eff_track_g', name: '御物术', description: '赋予追踪能力 (范围2)', type: CardType.EFFECT, rarity: Rarity.GOLD, iconColor: COLORS.RARITY_GOLD, effectConfig: { logic: 'track', influenceCount: 2 } },
-  // NEW EARLY GAME EFFECTS
+  
   { id: 'eff_wobble_s', name: '乱舞', description: '弹道变为波浪形', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'wobble', influenceCount: 1 } },
   { id: 'eff_giant_s', name: '巨大化', description: '体积变大，伤害提升', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'giant', influenceCount: 1 } },
+  
+  // Converted Hammer to Effect
+  { id: 'eff_hammer_s', name: '雷公锤', description: '激活雷公楔的蓝色雷霆 (范围1)', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: '#a9a9a9', effectConfig: { logic: 'lightning_buff', influenceCount: 1 } },
 ];
 
 // 4. Buffs (Stat modifiers for next artifact)

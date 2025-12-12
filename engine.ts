@@ -1,3 +1,4 @@
+
 import { Application, Container, Graphics, Text, Ticker } from 'pixi.js';
 import { CardDef, CardType, ElementType, EnemyDef, GameState, MapType, PlayerStats, Rarity } from './types';
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from './constants';
@@ -18,6 +19,11 @@ type Entity = Container & {
     isWet: boolean;
     wetTimer: number;
     isElectrified: boolean;
+    
+    // New Synergy Flags
+    hitByLightningYellow: number; // Timer
+    hitByLightningBlue: number; // Timer
+
     // Player Specific
     invulnTimer: number;
     moveTarget?: {x: number, y: number};
@@ -51,6 +57,9 @@ type Bullet = Container & {
     // Logic modifiers
     isWobble?: boolean;
     wobblePhase?: number;
+
+    // Water Snake Specific
+    snakeTimer?: number;
 }
 
 type Particle = Graphics & {
@@ -568,8 +577,14 @@ export class GameEngine {
         cont.isBurning = false;
         cont.isWet = false;
         cont.isElectrified = false;
+        
         cont.burnTimer = 0;
         cont.wetTimer = 0;
+        
+        // Synergy Timers
+        cont.hitByLightningYellow = 0;
+        cont.hitByLightningBlue = 0;
+        
         cont.hitFlashTimer = 0;
 
         this.enemies.push(cont);
@@ -597,6 +612,9 @@ export class GameEngine {
             activeEffects.forEach(eff => {
                 if (eff.logic === 'double') executionCount *= 2;
             });
+            
+            // CRITICAL FIX: Limit Max Execution Count to avoid freeze
+            executionCount = Math.min(executionCount, 128);
 
             const newEffects: ActiveEffect[] = [];
 
@@ -638,7 +656,11 @@ export class GameEngine {
                 if (eff.logic === 'double') {
                     eff.count--;
                 } else if (isArtifact) {
-                    eff.count--;
+                    if (eff.logic === 'lightning_buff' && card.artifactConfig?.element === ElementType.LIGHTNING) {
+                        eff.count--; // Only consume hammer buff on lightning weapons
+                    } else if (eff.logic !== 'lightning_buff') {
+                        eff.count--;
+                    }
                 }
             });
             activeEffects = activeEffects.filter(eff => eff.count > 0);
@@ -684,6 +706,7 @@ export class GameEngine {
         let track = false;
         let wobble = false;
         let giant = false;
+        let hasHammerBuff = false;
         
         activeEffects.forEach(m => {
             if (m.logic === 'split_back') isBack = true;
@@ -692,6 +715,7 @@ export class GameEngine {
             if (m.logic === 'track') track = true;
             if (m.logic === 'wobble') wobble = true;
             if (m.logic === 'giant') giant = true;
+            if (m.logic === 'lightning_buff') hasHammerBuff = true;
         });
         
         const flags = { track, wobble, giant };
@@ -702,7 +726,6 @@ export class GameEngine {
             let currentSource = { x: this.player.x, y: this.player.y };
             let potentialTargets = this.enemies.filter(e => {
                 const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
-                // CRITICAL FIX: Ensure !e.destroyed
                 return d < range && !e.isDead && !e.destroyed;
             });
             potentialTargets.sort((a,b) => Math.hypot(a.x-this.player.x, a.y-this.player.y) - Math.hypot(b.x-this.player.x, b.y-this.player.y));
@@ -710,36 +733,48 @@ export class GameEngine {
             let chains = 2 + (isFan ? 2 : 0) + (isRing ? 4 : 0);
             if (isBack) chains += 1;
             
-            const targetsHit: Entity[] = [];
+            // Execute twice if hammer buff is active (Blue + Yellow)
+            const iterations = hasHammerBuff ? 2 : 1;
             
-            for(let i=0; i<chains; i++) {
-                if (potentialTargets.length === 0) break;
-                let closestIdx = -1;
-                let minD = 9999;
+            for(let pass=0; pass < iterations; pass++) {
+                // Reset source for second pass or if multiple chains
+                // Actually each "chain" starts from player ideally or previous target.
+                // Simplified: Lightning hits distinct targets if possible.
                 
-                for(let j=0; j<potentialTargets.length; j++) {
-                     const t = potentialTargets[j];
-                     const d = Math.hypot(t.x - currentSource.x, t.y - currentSource.y);
-                     if (d < minD) { minD = d; closestIdx = j; }
-                }
+                // If Hammer Buff pass 1 (pass index 1), it's BLUE
+                const isBlue = pass === 1;
+                const lightningColor = isBlue ? ElementType.LIGHTNING_BLUE : ElementType.LIGHTNING;
+                const visualColor = isBlue ? 0x00ffff : 0xffff00;
+                
+                // Copy targets for this pass so we can hit same enemies with different colors
+                let passTargets = [...potentialTargets];
+                let passSource = { x: this.player.x, y: this.player.y };
 
-                if (closestIdx !== -1) {
-                    const target = potentialTargets[closestIdx];
-                    targetsHit.push(target);
-                    this.drawLightning(currentSource.x, currentSource.y, target.x, target.y);
-                    currentSource = { x: target.x, y: target.y };
-                    potentialTargets.splice(closestIdx, 1);
+                for(let i=0; i<chains; i++) {
+                    if (passTargets.length === 0) break;
+                    
+                    // Find closest to current source
+                    let closestIdx = -1;
+                    let minD = 9999;
+                    for(let j=0; j<passTargets.length; j++) {
+                         const t = passTargets[j];
+                         const d = Math.hypot(t.x - passSource.x, t.y - passSource.y);
+                         if (d < minD) { minD = d; closestIdx = j; }
+                    }
+
+                    if (closestIdx !== -1) {
+                        const target = passTargets[closestIdx];
+                        this.drawLightning(passSource.x, passSource.y, target.x, target.y, visualColor);
+                        
+                        // Apply damage & status
+                        const dmg = conf.baseDamage * this.stats.damageMultiplier * (giant ? 1.5 : 1);
+                        this.applyLightningDamage(target, dmg, lightningColor);
+                        
+                        passSource = { x: target.x, y: target.y };
+                        passTargets.splice(closestIdx, 1);
+                    }
                 }
             }
-            targetsHit.forEach(e => {
-                 // Check again before applying damage
-                 if (e.isDead || e.destroyed) return;
-                 const dmg = conf.baseDamage * this.stats.damageMultiplier * (giant ? 1.5 : 1);
-                 e.hp -= dmg;
-                 e.isElectrified = true;
-                 this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffff00);
-                 if (e.hp <= 0) this.killEnemy(e);
-            });
             return; 
         }
 
@@ -797,7 +832,7 @@ export class GameEngine {
         });
     }
 
-    drawLightning(x1: number, y1: number, x2: number, y2: number) {
+    drawLightning(x1: number, y1: number, x2: number, y2: number, color: number) {
         const g = new Graphics();
         const dist = Math.hypot(x2-x1, y2-y1);
         const steps = Math.max(2, Math.floor(dist / 20));
@@ -814,7 +849,7 @@ export class GameEngine {
             g.lineTo(px, py);
         }
         g.lineTo(x2, y2);
-        g.stroke({ width: 3, color: 0xffff00, alpha: 1 });
+        g.stroke({ width: 3, color: color, alpha: 1 });
 
         this.world.addChild(g);
         
@@ -822,6 +857,59 @@ export class GameEngine {
             container: g,
             life: 8,
             onUpdate: (gfx, life) => { gfx.alpha = life/8; }
+        });
+    }
+
+    applyLightningDamage(e: Entity, dmg: number, type: ElementType) {
+        if (e.isDead || e.destroyed) return;
+        
+        e.hp -= dmg;
+        e.isElectrified = true;
+        this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, type === ElementType.LIGHTNING_BLUE ? 0x00ffff : 0xffff00);
+        
+        // Update flags
+        if (type === ElementType.LIGHTNING) e.hitByLightningYellow = 30; // 0.5s approx at 60fps
+        if (type === ElementType.LIGHTNING_BLUE) e.hitByLightningBlue = 30;
+
+        // Check Synergy
+        if (e.hitByLightningYellow > 0 && e.hitByLightningBlue > 0) {
+            // Trigger Orb!
+            this.spawnLightningOrb(e.x, e.y);
+            // Reset to prevent infinite loop on same frame?
+            e.hitByLightningYellow = 0;
+            e.hitByLightningBlue = 0;
+        }
+
+        if (e.hp <= 0) this.killEnemy(e);
+    }
+
+    spawnLightningOrb(x: number, y: number) {
+        // Visual
+        const g = new Graphics();
+        g.circle(0,0, 60).fill({color: 0xffffff, alpha: 0.8});
+        g.circle(0,0, 50).fill({color: 0x8800ff, alpha: 0.5});
+        g.x = x; g.y = y;
+        g.blendMode = 'add';
+        this.world.addChild(g);
+        
+        this.tempEffects.push({
+            container: g,
+            life: 20,
+            onUpdate: (gfx, l) => { 
+                gfx.scale.set(1 + (20-l)*0.1); 
+                gfx.alpha = l/20; 
+            }
+        });
+
+        // AoE Damage
+        this.enemies.forEach(e => {
+            if (e.isDead || e.destroyed) return;
+            const d = Math.hypot(e.x - x, e.y - y);
+            if (d < 100) {
+                e.hp -= 200 * this.stats.damageMultiplier; // Massive damage
+                this.spawnText("CRASH!!", e.x, e.y - 40, 0xff00ff);
+                if (e.hp <= 0) this.killEnemy(e);
+            }
         });
     }
 
@@ -846,27 +934,17 @@ export class GameEngine {
              speed = 2; // Moves slightly
              b.scale.set(0.1); 
         } 
-        else if (conf.projectileType === 'stream') {
-             // Water Stream
-             const r = 10;
-             radius = r;
-             g.rect(0, -r, 40, r*2).fill(conf.color); // Long stream segment
-             g.circle(0, 0, r).fill(0xffffff); // Head
-             speed = 7 * buffs.speedMult;
-             life = 50 * buffs.rangeMult;
-             b.scale.set(0.3); 
-             angle += (Math.random() - 0.5) * 0.1; // Spray
-        }
-        else if (conf.projectileType === 'orbit') {
-            // Sword Orbit
-            g.rect(-2, -24, 4, 32).fill(0xe2e8f0); 
-            g.rect(-6, 8, 12, 4).fill(0xc084fc); 
-            g.rect(-2, 12, 4, 6).fill(0x475569); 
-            speed = 0;
-            life = 999999;
-            isPersistent = true;
-            b.orbitAngle = 0 + (dupeIndex * (Math.PI / 2)); 
-            b.rotation = Math.PI / 4; 
+        else if (conf.projectileType === 'water_snake') {
+             // New Water Logic: The Head of the Snake
+             // It doesn't have a big body itself, it acts as a spawner
+             radius = 15;
+             g.circle(0,0, 8).fill(0xa5f3fc); // Head
+             g.circle(0,0, 12).stroke({width: 2, color: 0xffffff, alpha: 0.5});
+             speed = 6 * buffs.speedMult;
+             life = 60 * buffs.rangeMult;
+             // Snake logic params
+             b.snakeTimer = 0;
+             b.pierce = 999; // Water pierces
         }
         else if (conf.projectileType === 'minion') {
             // --- San Jian Liang Ren Dao ---
@@ -927,7 +1005,7 @@ export class GameEngine {
         b.vx = Math.cos(angle) * speed;
         b.vy = Math.sin(angle) * speed;
         b.rotation = angle + Math.PI/2; // Orient graphics correctly
-        if (conf.projectileType === 'projectile' || conf.projectileType === 'stream') b.rotation = angle;
+        if (conf.projectileType === 'projectile' || conf.projectileType === 'water_snake') b.rotation = angle;
         if (conf.projectileType === 'area') b.rotation = angle;
         if (conf.element === ElementType.WIND) b.rotation = 0;
 
@@ -941,7 +1019,7 @@ export class GameEngine {
         b.isWobble = flags.wobble;
         b.wobblePhase = Math.random() * 10;
         b.hitList = new Set();
-        b.pierce = (conf.projectileType === 'area' || isPersistent || conf.element === ElementType.WIND || conf.projectileType === 'stream') ? 999 : 1;
+        b.pierce = (conf.projectileType === 'area' || isPersistent || conf.element === ElementType.WIND || conf.projectileType === 'water_snake') ? 999 : 1;
         b.color = conf.color;
         b.trailTimer = 0;
 
@@ -955,6 +1033,10 @@ export class GameEngine {
         this.enemies.forEach(e => {
             // CRITICAL FIX: Check destroyed or dead
             if (e.isDead || e.destroyed) return;
+
+            // Update synergy timers
+            if (e.hitByLightningYellow > 0) e.hitByLightningYellow -= delta;
+            if (e.hitByLightningBlue > 0) e.hitByLightningBlue -= delta;
 
             if (e.hitFlashTimer > 0) {
                 e.hitFlashTimer -= delta;
@@ -1035,7 +1117,47 @@ export class GameEngine {
                  b.scale.y += 0.05 * delta;
                  b.alpha -= 0.05 * delta;
             }
-            if (b.element === ElementType.WATER && b.scale.x < 3) {
+            
+            // --- Water Snake Logic ---
+            if (b.ownerId.startsWith('art_water') && b.snakeTimer !== undefined) {
+                // Scale head down slightly over time
+                b.scale.set(Math.max(0.1, b.duration / 60));
+                
+                // Spawn Body Part
+                b.snakeTimer += delta;
+                if (b.snakeTimer > 2) { // Every 2 frames
+                    const body = new Graphics();
+                    const r = 12 * b.scale.x;
+                    body.circle(0,0, r).fill({color: 0x00bfff, alpha: 0.6});
+                    body.x = b.x + (Math.random()-0.5)*5;
+                    body.y = b.y + (Math.random()-0.5)*5;
+                    this.world.addChild(body);
+                    
+                    // Add to temp effects (Water body logic)
+                    this.tempEffects.push({
+                        container: body,
+                        life: 40,
+                        onUpdate: (g, l) => {
+                             g.alpha = l/40;
+                             g.scale.set(1 + (40-l)*0.05); // Expand slightly
+                        }
+                    });
+                    
+                    // Add a "Hitbox" for the body? 
+                    // To keep it performant, we only check collision on the HEAD (b).
+                    // Or we could spawn separate invisible bullets for the body if we want a wall of water.
+                    // For now, let the head define the damage path.
+                    b.snakeTimer = 0;
+                }
+                
+                // Wiggle the snake head
+                b.rotation += Math.sin(b.duration * 0.2) * 0.05;
+                b.vx = Math.cos(b.rotation) * 6; // Enforce direction based on wiggle
+                b.vy = Math.sin(b.rotation) * 6;
+            }
+            
+            if (b.element === ElementType.WATER && b.scale.x < 3 && !b.snakeTimer) {
+                 // Fallback for old water stream if any exist
                  b.scale.x += 0.1 * delta;
                  b.scale.y += 0.1 * delta;
                  b.alpha -= 0.02 * delta;
@@ -1051,8 +1173,8 @@ export class GameEngine {
             if (b.vx !== 0 || b.vy !== 0) {
                 b.trailTimer -= delta;
                 if (b.trailTimer <= 0) {
-                    if (!b.ownerId.startsWith('art_sword') && !b.ownerId.startsWith('art_track')) {
-                       if (b.element !== ElementType.WATER || Math.random() > 0.7) {
+                    if (!b.ownerId.startsWith('art_track') && !b.snakeTimer) {
+                       if (Math.random() > 0.7) {
                           // Simple trail
                           const p = new Graphics();
                           p.rect(0,0, 4, 4).fill(b.color);
@@ -1143,16 +1265,6 @@ export class GameEngine {
                 // Reset hitlist occasionally so slash can hit multiple times
                 if (Math.floor(this.gameTime) % 10 === 0) b.hitList.clear();
             }
-            // --- Orbit Sword ---
-            else if (b.ownerId.includes('art_sword_orbit')) { 
-                if (b.orbitAngle === undefined) b.orbitAngle = 0;
-                b.orbitAngle += 0.05 * delta;
-                b.x = this.player.x + Math.cos(b.orbitAngle) * 100;
-                b.y = this.player.y + Math.sin(b.orbitAngle) * 100;
-                b.rotation = b.orbitAngle + Math.PI / 2; 
-                
-                if (Math.floor(this.gameTime) % 30 === 0) b.hitList.clear();
-            } 
             // --- Standard Projectiles ---
             else if (b.isTracking) {
                 let nearest = null;

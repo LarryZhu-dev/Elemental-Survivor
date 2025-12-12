@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine';
 import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
@@ -185,64 +186,82 @@ const App = () => {
       setSelectedCard(null);
   };
 
-  // Helper to determine if a slot is affected by previous effect cards
-  const calculateCardEffects = () => {
-      if (!stats) return { affected: new Set<number>(), sources: new Set<number>() };
+  // Helper to determine Groups for rendering chain borders
+  const calculateCardGroups = () => {
+      if (!stats) return new Map<number, string>();
       
-      const affected = new Set<number>();
-      const sources = new Set<number>();
-      
-      let activeEffects: { logic: string, count: number, sourceIndex: number }[] = [];
+      const slotClasses = new Map<number, string>();
+      let activeEffects: { count: number, id: string }[] = [];
       
       stats.inventory.forEach((card, index) => {
+          // Identify if this card is affected by previous effects
           if (activeEffects.length > 0) {
-              affected.add(index);
+              // Add classes based on position in chain
+              if (activeEffects.some(e => e.count > 0)) {
+                   // This slot is "middle" or "end"
+                   // We don't have perfect "end" knowledge without lookahead, but we can do:
+                   let cls = "chain-mid";
+                   // If this card consumes the last charge of the effect, it's an end
+                   // Note: Logic is complex because multiple effects can overlap.
+                   // Simplified: Mark as affected.
+                   slotClasses.set(index, (slotClasses.get(index) || "") + " chain-affected");
+              }
           }
 
+          // Execution count logic (same as engine)
           let executionCount = 1;
           activeEffects.forEach(eff => {
-              if (eff.logic === 'double') executionCount *= 2;
+              if (eff.id.includes('double')) executionCount *= 2;
           });
+          executionCount = Math.min(executionCount, 128);
 
-          const newEffects = [];
-
+          // Add New Effects
           if (card.type === CardType.EFFECT && card.effectConfig) {
-             sources.add(index);
+             slotClasses.set(index, (slotClasses.get(index) || "") + " chain-start"); // Source
+             
+             // Look ahead to find end index for CSS border logic?
+             // It's easier to just push to stack and decrement.
              for(let i=0; i<executionCount; i++) {
-                 newEffects.push({
-                     logic: card.effectConfig.logic,
+                 activeEffects.push({
                      count: card.effectConfig.influenceCount,
-                     sourceIndex: index
+                     id: card.id
                  });
              }
           }
 
+          // Decrement Effects
           const isArtifact = card.type === CardType.ARTIFACT;
           activeEffects.forEach(eff => {
-               if (eff.logic === 'double') eff.count--;
+               if (eff.id.includes('double')) eff.count--;
                else if (isArtifact) eff.count--;
           });
-          activeEffects = activeEffects.filter(eff => eff.count > 0);
           
-          activeEffects.push(...newEffects);
+          // Check for expired effects to mark this index as "chain-end" for that effect
+          // This is purely visual approximation. 
+          // If an effect just reached 0, this card was the last one.
+          const justFinished = activeEffects.filter(eff => eff.count === 0);
+          if (justFinished.length > 0) {
+              slotClasses.set(index, (slotClasses.get(index) || "") + " chain-end");
+          }
+
+          activeEffects = activeEffects.filter(eff => eff.count > 0);
       });
-      return { affected, sources };
+      return slotClasses;
   };
 
-  const { affected, sources } = calculateCardEffects();
+  const slotClasses = calculateCardGroups();
 
   const renderInventory = () => {
       if (!stats) return null;
 
       return stats.inventory.map((card, index) => {
-          const isAffected = affected.has(index);
-          const isSource = sources.has(index);
-
+          const cls = slotClasses.get(index) || "";
+          
           return (
             <div
                 key={card.id}
                 data-id={card.id}
-                className={`inv-slot rarity-${card.rarity} ${isAffected ? 'is-affected' : ''} ${isSource ? 'is-effect-source' : ''}`}
+                className={`inv-slot rarity-${card.rarity} ${cls}`}
                 onClick={() => setSelectedCard(card)}
             >
                 <div className="inv-slot-content w-full h-full flex items-center justify-center relative pointer-events-none">
@@ -260,6 +279,41 @@ const App = () => {
 
   return (
     <div className="app-container">
+      <style>{`
+        /* Chain Grouping Visuals */
+        .chain-start {
+            border-left: 3px solid #a855f7 !important;
+            border-top: 3px solid #a855f7 !important;
+            border-bottom: 3px solid #a855f7 !important;
+            border-right: none !important;
+            border-radius: 8px 0 0 8px;
+            margin-right: 0 !important;
+            box-shadow: -5px 0 10px rgba(168, 85, 247, 0.4);
+        }
+        .chain-affected {
+            border-top: 3px solid #22d3ee !important;
+            border-bottom: 3px solid #22d3ee !important;
+            border-left: none !important;
+            border-right: none !important;
+            border-radius: 0;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+            background-color: rgba(34, 211, 238, 0.05);
+        }
+        .chain-end {
+            border-right: 3px solid #22d3ee !important;
+            border-top: 3px solid #22d3ee !important;
+            border-bottom: 3px solid #22d3ee !important;
+            border-radius: 0 8px 8px 0;
+            margin-left: 0 !important;
+        }
+        /* Fix spacing when chained */
+        .chain-start + .chain-affected, 
+        .chain-affected + .chain-affected,
+        .chain-affected + .chain-end {
+            margin-left: -5px !important; /* Pull them together */
+        }
+      `}</style>
       <canvas ref={canvasRef} className="absolute inset-0" />
 
       {/* --- MENU --- */}
@@ -399,8 +453,8 @@ const App = () => {
          <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
            <h2 className="pause-title mb-4">暂停 / 装备调整</h2>
            <p className="pause-desc mb-8">
-             拖动卡片调整顺序。效果卡片会影响排列在它后面的卡片。<br/>
-             <span className="text-purple-400">紫色光辉</span>为效果源，<span className="text-cyan-400">青色虚线</span>为受影响卡片。
+             拖动卡片调整顺序。效果卡会与受影响卡片形成边框连接。<br/>
+             <span className="text-purple-400">紫色起始</span>，<span className="text-cyan-400">青色范围</span>。
            </p>
            
            <div className="pause-layout">
