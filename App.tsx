@@ -72,28 +72,28 @@ const App = () => {
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
 
   return (
-    <div className="relative w-full h-screen overflow-hidden font-['PixelFont'] text-white select-none">
-      <canvas ref={canvasRef} className="absolute top-0 left-0" />
+    <div className="app-container">
+      <canvas ref={canvasRef} className="absolute inset-0" />
 
       {/* --- MENU --- */}
       {gameState === GameState.MENU && (
-        <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-6">
-          <h1 className="text-6xl text-cyan-400 mb-8 drop-shadow-[0_4px_0_rgba(0,0,0,1)]">元素幸存者</h1>
-          <div className="space-y-4 flex flex-col">
+        <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-6">
+          <h1 className="menu-title mb-8">元素幸存者</h1>
+          <div className="flex flex-col gap-4">
             <button 
               onClick={() => startGame(MapType.FIXED)}
-              className="px-8 py-4 bg-gray-700 hover:bg-gray-600 border-4 border-white text-xl"
+              className="btn btn-fixed"
             >
               固定地图 (Fixed Map)
             </button>
             <button 
               onClick={() => startGame(MapType.INFINITE)}
-              className="px-8 py-4 bg-gray-700 hover:bg-gray-600 border-4 border-purple-500 text-xl"
+              className="btn btn-infinite"
             >
               无限地图 (Infinite Map)
             </button>
           </div>
-          <div className="mt-8 text-gray-400 text-sm max-w-md text-center">
+          <div className="instructions mt-8 text-center">
             操作: 鼠标瞄准, F 键移动 (跟随鼠标), S 键站立.<br/>
             Esc 暂停/整理背包.
           </div>
@@ -104,31 +104,31 @@ const App = () => {
       {gameState === GameState.PLAYING && stats && (
         <div className="absolute inset-0 pointer-events-none p-4">
            {/* HP Bar */}
-           <div className="absolute top-4 left-4 w-64 h-6 bg-gray-800 border-2 border-white">
+           <div className="bar-container bar-hp">
              <div 
-               className="h-full bg-red-500 transition-all duration-300" 
+               className="bar-fill fill-red" 
                style={{ width: `${(stats.hp / stats.maxHp) * 100}%` }} 
              />
-             <span className="absolute inset-0 flex items-center justify-center text-xs drop-shadow-md">
+             <span className="hp-text">
                 {Math.ceil(stats.hp)} / {Math.ceil(stats.maxHp)}
              </span>
            </div>
            
            {/* XP Bar */}
-           <div className="absolute top-12 left-4 w-64 h-4 bg-gray-800 border-2 border-white">
+           <div className="bar-container bar-xp">
              <div 
-               className="h-full bg-yellow-400 transition-all duration-300" 
+               className="bar-fill fill-yellow" 
                style={{ width: `${(stats.xp / stats.nextLevelXp) * 100}%` }} 
              />
            </div>
-           <div className="absolute top-12 left-[290px] text-yellow-400 font-bold text-xl">
+           <div className="lvl-text">
              LV {stats.level}
            </div>
 
            {/* Wave Info */}
-           <div className="absolute top-4 right-4 text-right">
-             <div className="text-2xl text-red-400">WAVE {engineRef.current?.wave}</div>
-             <div className="text-sm text-gray-400">
+           <div className="wave-info">
+             <div className="wave-title">WAVE {engineRef.current?.wave}</div>
+             <div className="wave-timer">
                {Math.floor((engineRef.current?.gameTime || 0) / 60)}:
                {Math.floor((engineRef.current?.gameTime || 0) % 60).toString().padStart(2, '0')}
              </div>
@@ -138,8 +138,8 @@ const App = () => {
 
       {/* --- BOSS WARNING --- */}
       {bossWarning && (
-         <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-red-900/30">
-            <div className="text-6xl text-red-500 animate-pulse font-bold border-y-4 border-red-500 py-4 px-12 bg-black/50">
+         <div className="absolute inset-0 flex items-center justify-center pointer-events-none boss-overlay">
+            <div className="boss-text">
                警告: {bossWarning}
             </div>
          </div>
@@ -147,23 +147,23 @@ const App = () => {
 
       {/* --- LEVEL UP --- */}
       {gameState === GameState.LEVEL_UP && (
-        <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center z-50">
-          <h2 className="text-4xl text-yellow-300 mb-8">等级提升! 选择强化</h2>
+        <div className="absolute inset-0 overlay-darker flex flex-col items-center justify-center z-50">
+          <h2 className="levelup-title mb-8">等级提升! 选择强化</h2>
           <div className="flex gap-4">
             {levelUpOptions.map((card, i) => (
               <div 
                 key={i}
                 onClick={() => selectCard(card)}
-                className="w-48 h-64 bg-slate-800 border-4 hover:scale-105 transition-transform cursor-pointer p-4 flex flex-col"
+                className="card"
                 style={{ borderColor: card.iconColor }}
               >
-                <div className="h-24 w-full mb-4 flex items-center justify-center bg-black/30 text-4xl">
+                <div className="card-icon">
                    {/* Placeholder Icon */}
                    <div style={{ color: card.iconColor }}>★</div>
                 </div>
-                <h3 className="text-lg font-bold mb-2" style={{ color: card.iconColor }}>{card.name}</h3>
-                <p className="text-xs text-gray-300">{card.description}</p>
-                <div className="mt-auto text-xs uppercase opacity-50 text-center">{card.type}</div>
+                <h3 className="card-name mb-2" style={{ color: card.iconColor }}>{card.name}</h3>
+                <p className="card-desc">{card.description}</p>
+                <div className="card-type mt-auto">{card.type}</div>
               </div>
             ))}
           </div>
@@ -172,14 +172,14 @@ const App = () => {
 
       {/* --- PAUSE / INVENTORY --- */}
       {gameState === GameState.PAUSED && stats && (
-         <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center z-40">
-           <h2 className="text-4xl mb-4 text-white">暂停 / 装备调整</h2>
-           <p className="text-sm text-gray-400 mb-8 max-w-lg text-center">
+         <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
+           <h2 className="pause-title mb-4">暂停 / 装备调整</h2>
+           <p className="pause-desc mb-8">
              拖动卡片调整顺序。效果卡片(Effect)会影响排列在它后面的技能(Artifact)。<br/>
              例如: [双重触发] -> [火葫芦] = 双倍火焰。
            </p>
            
-           <div className="w-[800px] flex flex-wrap gap-2 p-4 border-2 border-gray-600 bg-gray-900 min-h-[200px]">
+           <div className="inv-grid gap-2">
              {stats.inventory.map((card, index) => (
                <div
                  key={card.id}
@@ -187,18 +187,18 @@ const App = () => {
                  onDragStart={(e) => handleDragStart(e, index)}
                  onDrop={(e) => handleDrop(e, index)}
                  onDragOver={handleDragOver}
-                 className="w-16 h-16 bg-slate-700 border-2 flex items-center justify-center text-xs text-center cursor-grab active:cursor-grabbing relative group"
+                 className="inv-slot group"
                  style={{ borderColor: card.iconColor }}
                  title={card.name + "\n" + card.description}
                >
-                 {card.type === CardType.EFFECT && <span className="absolute top-0 right-0 text-[8px] bg-white text-black px-1">E</span>}
-                 {card.type === CardType.BUFF && <span className="absolute top-0 right-0 text-[8px] bg-cyan-200 text-black px-1">B</span>}
+                 {card.type === CardType.EFFECT && <span className="badge badge-effect">E</span>}
+                 {card.type === CardType.BUFF && <span className="badge badge-buff">B</span>}
                  {card.name.substring(0, 2)}
                  
                  {/* Hover Tooltip */}
-                 <div className="absolute bottom-full mb-2 hidden group-hover:block w-32 bg-black border border-white p-2 z-50 pointer-events-none">
+                 <div className="tooltip">
                     <div className="font-bold">{card.name}</div>
-                    <div className="text-[10px]">{card.description}</div>
+                    <div className="text-tiny">{card.description}</div>
                  </div>
                </div>
              ))}
@@ -209,7 +209,7 @@ const App = () => {
                 setGameState(GameState.PLAYING);
                 engineRef.current?.resume();
              }}
-             className="mt-8 px-8 py-2 bg-green-600 hover:bg-green-500 text-white border-2 border-green-300"
+             className="btn-resume mt-8"
            >
              继续游戏
            </button>
@@ -218,17 +218,17 @@ const App = () => {
 
       {/* --- VICTORY --- */}
       {gameState === GameState.VICTORY && (
-          <div className="absolute inset-0 bg-white text-black flex flex-col items-center justify-center z-50">
-             <h1 className="text-8xl font-bold mb-8">胜利!</h1>
-             <p className="text-2xl mb-8">你击败了终极 BOSS.</p>
-             <div className="bg-gray-100 p-8 border-4 border-black text-center">
-                <h3 className="text-xl font-bold mb-4">Cast</h3>
+          <div className="absolute inset-0 victory-overlay flex flex-col items-center justify-center z-50">
+             <h1 className="victory-title mb-8">胜利!</h1>
+             <p className="victory-subtitle mb-8">你击败了终极 BOSS.</p>
+             <div className="cast-box mb-8">
+                <h3 className="cast-title mb-4">Cast</h3>
                 <p>Producer: You</p>
                 <p>Engine: Pixi.js</p>
                 <p>UI: React</p>
                 <p>Thank you for playing!</p>
              </div>
-             <button onClick={() => window.location.reload()} className="mt-8 underline">再玩一次</button>
+             <button onClick={() => window.location.reload()} className="btn-replay mt-8">再玩一次</button>
           </div>
       )}
     </div>

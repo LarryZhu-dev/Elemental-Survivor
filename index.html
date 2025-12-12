@@ -4,22 +4,312 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Elemental Survivor</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @font-face {
         font-family: 'PixelFont';
         src: url('https://cdn.jsdelivr.net/fontsource/fonts/fusion-pixel-12px-proportional-tc@latest/latin-400-normal.woff2') format('woff2');
       }
+
+      /* --- Base Reset & Defaults --- */
       body {
         margin: 0;
         overflow: hidden;
         background-color: #1a1a1a;
         font-family: 'PixelFont', sans-serif;
         user-select: none;
+        color: white;
       }
       canvas {
         display: block;
       }
+
+      /* --- Utilities --- */
+      .absolute { position: absolute; }
+      .relative { position: relative; }
+      .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+      .w-full { width: 100%; }
+      .h-screen { height: 100vh; }
+      .flex { display: flex; }
+      .flex-col { flex-direction: column; }
+      .items-center { align-items: center; }
+      .justify-center { justify-content: center; }
+      .text-center { text-align: center; }
+      .pointer-events-none { pointer-events: none; }
+      .z-40 { z-index: 40; }
+      .z-50 { z-index: 50; }
+      .hidden { display: none; }
+      .block { display: block; }
+      
+      /* --- Components --- */
+
+      /* App Container */
+      .app-container {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      /* Menus & Overlays */
+      .overlay-bg {
+        background-color: rgba(0, 0, 0, 0.8);
+      }
+      .overlay-darker {
+        background-color: rgba(0, 0, 0, 0.9);
+      }
+      .gap-6 { gap: 1.5rem; }
+      .gap-4 { gap: 1rem; }
+      .gap-2 { gap: 0.5rem; }
+      .mb-8 { margin-bottom: 2rem; }
+      .mb-4 { margin-bottom: 1rem; }
+      .mb-2 { margin-bottom: 0.5rem; }
+      .mt-8 { margin-top: 2rem; }
+      .mt-auto { margin-top: auto; }
+      .p-4 { padding: 1rem; }
+      .p-8 { padding: 2rem; }
+
+      /* Main Menu */
+      .menu-title {
+        font-size: 3.75rem; /* 6xl */
+        line-height: 1;
+        color: #22d3ee; /* cyan-400 */
+        text-shadow: 0 4px 0 rgba(0,0,0,1);
+      }
+      .btn {
+        padding: 1rem 2rem;
+        font-size: 1.25rem; /* xl */
+        border-width: 4px;
+        cursor: pointer;
+        background-color: #374151; /* gray-700 */
+        color: white;
+        transition: background-color 0.2s;
+      }
+      .btn:hover { background-color: #4b5563; /* gray-600 */ }
+      .btn-fixed { border-color: white; }
+      .btn-infinite { border-color: #a855f7; /* purple-500 */ }
+      .instructions {
+        color: #9ca3af; /* gray-400 */
+        font-size: 0.875rem; /* sm */
+        max-width: 28rem;
+      }
+
+      /* HUD */
+      .bar-container {
+        position: absolute;
+        width: 16rem;
+        background-color: #1f2937; /* gray-800 */
+        border: 2px solid white;
+      }
+      .bar-hp { top: 1rem; left: 1rem; height: 1.5rem; }
+      .bar-xp { top: 3rem; left: 1rem; height: 1rem; }
+      .bar-fill {
+        height: 100%;
+        transition: width 0.3s;
+      }
+      .fill-red { background-color: #ef4444; }
+      .fill-yellow { background-color: #facc15; }
+      
+      .hp-text {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem; /* xs */
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+      }
+      
+      .lvl-text {
+        position: absolute;
+        top: 3rem;
+        left: 290px;
+        color: #facc15; /* yellow-400 */
+        font-weight: bold;
+        font-size: 1.25rem; /* xl */
+      }
+
+      .wave-info {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        text-align: right;
+      }
+      .wave-title {
+        font-size: 1.5rem; /* 2xl */
+        color: #f87171; /* red-400 */
+      }
+      .wave-timer {
+        font-size: 0.875rem; /* sm */
+        color: #9ca3af; /* gray-400 */
+      }
+
+      /* Boss Warning */
+      .boss-overlay {
+        background-color: rgba(127, 29, 29, 0.3); /* red-900/30 */
+      }
+      .boss-text {
+        font-size: 3.75rem; /* 6xl */
+        color: #ef4444; /* red-500 */
+        font-weight: bold;
+        border-top: 4px solid #ef4444;
+        border-bottom: 4px solid #ef4444;
+        padding: 1rem 3rem;
+        background-color: rgba(0,0,0,0.5);
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: .5; }
+      }
+
+      /* Level Up Card */
+      .levelup-title {
+        font-size: 2.25rem; /* 4xl */
+        color: #fde047; /* yellow-300 */
+      }
+      .card {
+        width: 12rem;
+        height: 16rem;
+        background-color: #1e293b; /* slate-800 */
+        border-width: 4px;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        cursor: pointer;
+        transition: transform 0.1s;
+      }
+      .card:hover { transform: scale(1.05); }
+      .card-icon {
+        height: 6rem;
+        width: 100%;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: rgba(0,0,0,0.3);
+        font-size: 2.25rem;
+      }
+      .card-name {
+        font-size: 1.125rem; /* lg */
+        font-weight: bold;
+      }
+      .card-desc {
+        font-size: 0.75rem; /* xs */
+        color: #d1d5db; /* gray-300 */
+      }
+      .card-type {
+        font-size: 0.75rem; /* xs */
+        text-transform: uppercase;
+        opacity: 0.5;
+        text-align: center;
+      }
+
+      /* Inventory / Pause */
+      .pause-overlay {
+        background-color: rgba(0, 0, 0, 0.85);
+      }
+      .pause-title {
+        font-size: 2.25rem; /* 4xl */
+        color: white;
+      }
+      .pause-desc {
+        font-size: 0.875rem; /* sm */
+        color: #9ca3af; /* gray-400 */
+        text-align: center;
+        max-width: 32rem; /* lg */
+      }
+      .inv-grid {
+        width: 800px;
+        display: flex;
+        flex-wrap: wrap;
+        padding: 1rem;
+        border: 2px solid #4b5563; /* gray-600 */
+        background-color: #111827; /* gray-900 */
+        min-height: 200px;
+      }
+      .inv-slot {
+        width: 4rem;
+        height: 4rem;
+        background-color: #334155; /* slate-700 */
+        border-width: 2px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem; /* xs */
+        text-align: center;
+        cursor: grab;
+        position: relative;
+      }
+      .inv-slot:active { cursor: grabbing; }
+      .badge {
+        position: absolute;
+        top: 0;
+        right: 0;
+        font-size: 8px;
+        padding: 0 0.25rem;
+      }
+      .badge-effect { background-color: white; color: black; }
+      .badge-buff { background-color: #a5f3fc; /* cyan-200 */ color: black; }
+      
+      /* Tooltip */
+      .tooltip {
+        position: absolute;
+        bottom: 100%;
+        margin-bottom: 0.5rem;
+        width: 8rem;
+        background-color: black;
+        border: 1px solid white;
+        padding: 0.5rem;
+        z-index: 50;
+        pointer-events: none;
+        text-align: left;
+        display: none;
+      }
+      .group:hover .tooltip { display: block; }
+      .font-bold { font-weight: bold; }
+      .text-tiny { font-size: 10px; }
+
+      .btn-resume {
+        padding: 0.5rem 2rem;
+        background-color: #16a34a; /* green-600 */
+        border: 2px solid #86efac; /* green-300 */
+        color: white;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      .btn-resume:hover { background-color: #22c55e; /* green-500 */ }
+
+      /* Victory Screen */
+      .victory-overlay {
+        background-color: white;
+        color: black;
+      }
+      .victory-title {
+        font-size: 6rem; /* 8xl */
+        font-weight: bold;
+      }
+      .victory-subtitle {
+        font-size: 1.5rem; /* 2xl */
+      }
+      .cast-box {
+        background-color: #f3f4f6; /* gray-100 */
+        padding: 2rem;
+        border: 4px solid black;
+        text-align: center;
+      }
+      .cast-title {
+        font-size: 1.25rem; /* xl */
+        font-weight: bold;
+      }
+      .btn-replay {
+        text-decoration: underline;
+        background: none;
+        border: none;
+        font-size: 1rem;
+        cursor: pointer;
+        color: black;
+      }
+
       /* Custom Scrollbar for Inventory */
       ::-webkit-scrollbar {
         width: 8px;
