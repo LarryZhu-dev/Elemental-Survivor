@@ -24,6 +24,12 @@ type Entity = Container & {
     hitByLightningYellow: number; // Timer for Mirror
     hitByLightningBlue: number;   // Timer for Wedge
 
+    // Visuals
+    enemyType: 'slime' | 'bat' | 'skull' | 'eye' | 'boss';
+    animOffset: number;
+    baseScale: number;
+    hitFlashTimer: number;
+
     // Boss Props
     isBoss?: boolean;
     bossType?: number;
@@ -32,8 +38,6 @@ type Entity = Container & {
     // Player Specific
     invulnTimer: number;
     moveTarget?: {x: number, y: number};
-    // Visuals
-    hitFlashTimer: number;
 }
 
 type Bullet = Container & {
@@ -63,6 +67,7 @@ type Bullet = Container & {
     // Logic modifiers
     isWobble?: boolean;
     wobblePhase?: number;
+    giantCount: number; // Stacking giant effect
 
     // Water Snake Specific
     snakeTimer?: number;
@@ -548,24 +553,12 @@ export class GameEngine {
         
         let color = 0xff0000;
         let size = 50;
-
-        switch(bossIndex) {
-            case 1: color = 0xef4444; size = 60; break; // Red Giant
-            case 2: color = 0x3b82f6; size = 55; break; // Blue Mage
-            case 3: color = 0x22c55e; size = 50; break; // Green Toxic
-            case 4: color = 0xa855f7; size = 55; break; // Purple Void
-            case 5: color = 0xeab308; size = 70; break; // Gold Tank
-            case 6: color = 0xf97316; size = 45; break; // Orange Shooter
-            case 7: color = 0xec4899; size = 50; break; // Pink Rusher
-            case 8: color = 0x64748b; size = 80; break; // Grey Golem
-            case 9: color = 0x14b8a6; size = 55; break; // Teal Spirit
-            case 0: color = 0x000000; size = 90; break; // The End
-        }
-
+        // Boss visual slightly improved
         g.rect(-size/2, -size/2, size, size).fill(color);
         // Boss Eye
         g.rect(-10, -10, 20, 20).fill(0xffff00);
-        
+        g.rect(-40, -5, 80, 10).fill(0x330000); // Arms
+
         cont.addChild(g);
         cont.x = x;
         cont.y = y;
@@ -576,8 +569,11 @@ export class GameEngine {
         cont.vx = 0; cont.vy = 0;
         cont.knockbackVx = 0; cont.knockbackVy = 0;
         cont.isBoss = true;
+        cont.enemyType = 'boss';
         cont.bossType = bossIndex;
         cont.bossActionTimer = 120; // 2 sec cooldown
+        cont.animOffset = Math.random() * 100;
+        cont.baseScale = 1;
 
         // Init status
         cont.isBurning = false; cont.burnTimer = 0;
@@ -602,33 +598,61 @@ export class GameEngine {
         const cont = new Container() as Entity;
         const g = new Graphics();
         
-        // Difficulty Scaling: Size & Color
-        const scaleFactor = Math.min(2.5, 1 + (this.wave * 0.02));
-        const type = Math.floor(Math.random() * 3);
+        // 1. Difficulty & Type Scaling
+        let type: 'slime' | 'bat' | 'skull' | 'eye' = 'slime';
+        if (this.wave > 3 && Math.random() > 0.6) type = 'bat';
+        if (this.wave > 10 && Math.random() > 0.7) type = 'skull';
+        if (this.wave > 20 && Math.random() > 0.8) type = 'eye';
+
+        // 2. Size Scaling: Exponential growth with wave
+        // Base size + (wave * factor)
+        const sizeFactor = 1 + Math.pow(this.wave, 1.1) * 0.05;
         
-        if (type === 0) {
-            g.rect(-6, -6, 12, 12).fill(0x10b981); // Green
-        } else if (type === 1) {
-            g.rect(-6, -4, 12, 8).fill(0x06b6d4); // Cyan
-        } else {
-            g.rect(-4, -4, 8, 8).fill(0x8b5cf6); // Purple
+        // Draw based on type
+        switch(type) {
+            case 'slime':
+                // Green, blobby
+                g.roundRect(-8, -8, 16, 16, 5).fill(0x10b981);
+                g.circle(-3, -3, 2).fill(0x000000); // Eye
+                g.circle(3, -3, 2).fill(0x000000); // Eye
+                cont.radius = 8 * sizeFactor;
+                break;
+            case 'bat':
+                // Purple, fast, flying V shape
+                g.poly([-10, -5, 0, 5, 10, -5, 0, 2]).fill(0x8b5cf6);
+                cont.radius = 6 * sizeFactor;
+                break;
+            case 'skull':
+                // Grey, slow, tough
+                g.rect(-10, -12, 20, 20).fill(0x9ca3af);
+                g.rect(-4, 8, 8, 4).fill(0x9ca3af); // Jaw
+                g.rect(-6, -4, 4, 4).fill(0x000000); // Eye
+                g.rect(2, -4, 4, 4).fill(0x000000); // Eye
+                cont.radius = 12 * sizeFactor;
+                break;
+            case 'eye':
+                // Red, floating, watching
+                g.circle(0, 0, 10).fill(0xffffff);
+                g.circle(0, 0, 4).fill(0xff0000); // Iris
+                g.circle(0, 0, 14).stroke({ width: 2, color: 0xef4444 });
+                cont.radius = 10 * sizeFactor;
+                break;
         }
 
-        cont.scale.set(scaleFactor);
-
+        cont.scale.set(sizeFactor);
+        cont.baseScale = sizeFactor;
+        
         cont.addChild(g);
         cont.x = x;
         cont.y = y;
         
-        const waveHP = 8 + Math.pow(this.wave, 1.5) * 2;
+        const waveHP = (10 + Math.pow(this.wave, 1.6) * 3) * sizeFactor;
         cont.maxHp = waveHP;
         cont.hp = cont.maxHp;
-        cont.radius = 10 * scaleFactor;
+        
         cont.isDead = false;
-        cont.vx = 0; 
-        cont.vy = 0;
-        cont.knockbackVx = 0;
-        cont.knockbackVy = 0;
+        cont.vx = 0; cont.vy = 0;
+        cont.knockbackVx = 0; cont.knockbackVy = 0;
         
         cont.isBurning = false; cont.burnTimer = 0;
         cont.isWet = false; cont.wetTimer = 0;
@@ -636,6 +660,8 @@ export class GameEngine {
         cont.hitByLightningYellow = 0;
         cont.hitByLightningBlue = 0;
         cont.hitFlashTimer = 0;
+        cont.enemyType = type;
+        cont.animOffset = Math.random() * 100;
 
         this.enemies.push(cont);
         this.world.addChild(cont);
@@ -721,7 +747,6 @@ export class GameEngine {
         // --- Jade Ruyi (Pull) Special Logic ---
         if (conf.projectileType === 'pull_screen') {
              const flash = new Graphics();
-             // Full Screen Ripple Effect
              flash.rect(0,0, SCREEN_WIDTH, SCREEN_HEIGHT).fill({color: 0xff00ff, alpha: 0.2});
              flash.blendMode = 'add';
              this.world.addChild(flash);
@@ -732,19 +757,11 @@ export class GameEngine {
                  onUpdate: (g, life) => { g.alpha = (life/30) * 0.4; }
              });
 
-             // Pull ALL Orbs
              let count = 0;
              this.xpOrbs.forEach(orb => {
                  orb.isMagnetized = true;
                  count++;
              });
-             // Spawn some visual particles from edges to center
-             for(let i=0; i<20; i++) {
-                 const angle = Math.random() * Math.PI * 2;
-                 const px = this.player.x + Math.cos(angle) * SCREEN_WIDTH;
-                 const py = this.player.y + Math.sin(angle) * SCREEN_WIDTH;
-                 this.spawnParticle(px, py, 0xff00ff, 1);
-             }
 
              if (count > 0 && dupeIndex === 0) this.spawnText("GATHER!", this.player.x, this.player.y - 60, 0xff00ff);
              return; 
@@ -761,7 +778,7 @@ export class GameEngine {
         let isBack = false;
         let track = false;
         let wobble = false;
-        let giant = false;
+        let giantCount = 0; // Changed from boolean to number
         
         activeEffects.forEach(m => {
             if (m.logic === 'split_back') isBack = true;
@@ -769,10 +786,10 @@ export class GameEngine {
             if (m.logic === 'ring') isRing = true;
             if (m.logic === 'track') track = true;
             if (m.logic === 'wobble') wobble = true;
-            if (m.logic === 'giant') giant = true;
+            if (m.logic === 'giant') giantCount += 1; // Accumulate Giant
         });
         
-        const flags = { track, wobble, giant };
+        const flags = { track, wobble, giantCount };
 
         // --- Lightning Logic ---
         if (conf.element === ElementType.LIGHTNING || conf.element === ElementType.LIGHTNING_BLUE) {
@@ -785,7 +802,7 @@ export class GameEngine {
             // Sort by distance
             potentialTargets.sort((a,b) => Math.hypot(a.x-this.player.x, a.y-this.player.y) - Math.hypot(b.x-this.player.x, b.y-this.player.y));
 
-            let chains = 3 + (isFan ? 4 : 0) + (isRing ? 6 : 0); // Increase chains with effects
+            let chains = 3 + (isFan ? 4 : 0) + (isRing ? 6 : 0); 
             if (isBack) chains += 2;
             
             const lightningColor = conf.element;
@@ -794,7 +811,6 @@ export class GameEngine {
             for(let i=0; i<chains; i++) {
                 if (potentialTargets.length === 0) break;
                 
-                // Chain to closest available
                 let closestIdx = -1;
                 let minD = 9999;
                 for(let j=0; j<potentialTargets.length; j++) {
@@ -805,9 +821,10 @@ export class GameEngine {
 
                 if (closestIdx !== -1) {
                     const target = potentialTargets[closestIdx];
-                    this.drawLightning(currentSource.x, currentSource.y, target.x, target.y, visualColor);
+                    this.drawLightning(currentSource.x, currentSource.y, target.x, target.y, visualColor, giantCount, wobble);
                     
-                    const dmg = conf.baseDamage * this.stats.damageMultiplier * (giant ? 1.5 : 1);
+                    // Giant scales damage for lightning too
+                    const dmg = conf.baseDamage * this.stats.damageMultiplier * (1 + giantCount * 0.5);
                     this.applyLightningDamage(target, dmg, lightningColor);
                     
                     currentSource = { x: target.x, y: target.y };
@@ -841,7 +858,6 @@ export class GameEngine {
             baseAngle = Math.atan2(dy, dx);
         }
 
-        // Force Fan for Fire Gourd inherently, but let effects stack
         if (conf.element === ElementType.FIRE) {
              isFan = true;
         }
@@ -873,7 +889,7 @@ export class GameEngine {
         });
     }
 
-    drawLightning(x1: number, y1: number, x2: number, y2: number, color: number) {
+    drawLightning(x1: number, y1: number, x2: number, y2: number, color: number, giantCount: number, isWobble: boolean) {
         const g = new Graphics();
         const dist = Math.hypot(x2-x1, y2-y1);
         const steps = Math.max(3, Math.floor(dist / 15));
@@ -885,15 +901,18 @@ export class GameEngine {
             const t = i / steps;
             const targetX = x1 + (x2-x1)*t;
             const targetY = y1 + (y2-y1)*t;
-            const jitter = 20;
+            // Wobble increases jitter for lightning
+            const jitter = isWobble ? 40 : 20;
             const px = targetX + (Math.random()-0.5)*jitter;
             const py = targetY + (Math.random()-0.5)*jitter;
             g.lineTo(px, py);
         }
         g.lineTo(x2, y2);
         
-        g.stroke({ width: 3, color: 0xffffff, alpha: 1 });
-        g.stroke({ width: 6, color: color, alpha: 0.4 }); // Glow
+        // Giant increases thickness
+        const thickness = 3 + giantCount * 2;
+        g.stroke({ width: thickness, color: 0xffffff, alpha: 1 });
+        g.stroke({ width: thickness * 2, color: color, alpha: 0.4 }); // Glow
 
         this.world.addChild(g);
         
@@ -907,32 +926,34 @@ export class GameEngine {
     applyLightningDamage(e: Entity, dmg: number, type: ElementType) {
         if (e.isDead || e.destroyed) return;
         
+        // Check for Lightning + Fire interaction
+        if (e.isBurning) {
+            this.spawnLightningStorm(e.x, e.y, 0.6); // Mini storm
+            e.isBurning = false; // Overload consumes burn
+            this.spawnText("OVERLOAD", e.x, e.y - 40, 0xffaa00);
+        }
+
         e.hp -= dmg;
         e.isElectrified = true;
         
-        // Update flags
-        if (type === ElementType.LIGHTNING) e.hitByLightningYellow = 20; // Mirror
-        if (type === ElementType.LIGHTNING_BLUE) e.hitByLightningBlue = 20; // Wedge
+        if (type === ElementType.LIGHTNING) e.hitByLightningYellow = 20; 
+        if (type === ElementType.LIGHTNING_BLUE) e.hitByLightningBlue = 20; 
 
-        // Check Synergy (Intersection)
         if (e.hitByLightningYellow > 0 && e.hitByLightningBlue > 0) {
-            this.spawnLightningStorm(e.x, e.y);
-            // Reset to prevent infinite loop on same frame
+            this.spawnLightningStorm(e.x, e.y, 1.0);
             e.hitByLightningYellow = 0;
             e.hitByLightningBlue = 0;
         } else {
-            // Normal hit text
             this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, type === ElementType.LIGHTNING_BLUE ? 0x00ffff : 0xffff00);
         }
 
         if (e.hp <= 0) this.killEnemy(e);
     }
 
-    spawnLightningStorm(x: number, y: number) {
-        // Visual: Big Explosion
+    spawnLightningStorm(x: number, y: number, scale = 1.0) {
         const g = new Graphics();
-        g.circle(0,0, 120).fill({color: 0xffffff, alpha: 0.9});
-        g.circle(0,0, 100).fill({color: 0x8800ff, alpha: 0.5});
+        g.circle(0,0, 120 * scale).fill({color: 0xffffff, alpha: 0.9});
+        g.circle(0,0, 100 * scale).fill({color: 0x8800ff, alpha: 0.5});
         g.x = x; g.y = y;
         g.blendMode = 'add';
         this.world.addChild(g);
@@ -946,23 +967,18 @@ export class GameEngine {
             }
         });
 
-        // AoE Damage
-        const radius = 150;
-        let hits = 0;
+        const radius = 150 * scale;
         this.enemies.forEach(e => {
             if (e.isDead || e.destroyed) return;
             const d = Math.hypot(e.x - x, e.y - y);
             if (d < radius) {
-                e.hp -= 200 * this.stats.damageMultiplier; // Massive damage
+                e.hp -= 200 * this.stats.damageMultiplier * scale; 
                 if (e.hp <= 0) this.killEnemy(e);
-                hits++;
             }
         });
-        
-        if (hits > 0) this.spawnText("THUNDER STORM!!", x, y - 60, 0xff00ff);
     }
 
-    createBullet(conf: any, angle: number, buffs: any, flags: {track: boolean, wobble: boolean, giant: boolean}, ownerId: string, dupeIndex: number) {
+    createBullet(conf: any, angle: number, buffs: any, flags: {track: boolean, wobble: boolean, giantCount: number}, ownerId: string, dupeIndex: number) {
         const b = new Container() as Bullet;
         const g = new Graphics();
         
@@ -970,7 +986,9 @@ export class GameEngine {
         let life = 180 * buffs.rangeMult; 
         let radius = 12;
         
-        if (flags.giant) b.scale.set(1.5);
+        // Stacking Giant Logic
+        const scaleMod = 1 + (flags.giantCount * 0.5); 
+        b.scale.set(scaleMod);
 
         // --- Wind Bag (Universal Direction Support) ---
         if (conf.element === ElementType.WIND) {
@@ -981,13 +999,10 @@ export class GameEngine {
              g.arc(0, 0, r*0.8, -0.4, 0.4).stroke({ width: 2, color: 0xa5f3fc, alpha: 0.5 });
              life = 40; 
              speed = 4; // Moves forward
-             b.scale.set(0.1); 
-             // Rotation is vital for Fan support
+             b.scale.set(0.1 * scaleMod); // Apply Giant
              b.rotation = angle;
         } 
-        // --- Fire Gourd (Plasma Effect) ---
         else if (conf.element === ElementType.FIRE) {
-             // We draw nothing initially, will draw in updateBullets for animation
              radius = 60 * buffs.rangeMult;
              speed = 3 * buffs.speedMult;
              life = 45 * buffs.rangeMult;
@@ -1005,12 +1020,9 @@ export class GameEngine {
              b.rotation = angle;
         }
         else if (conf.projectileType === 'minion') {
-            // San Jian Liang Ren Dao
             g.rect(-2, -20, 4, 60).fill(0x52525b); 
             g.rect(-3, 30, 6, 5).fill(0xd4d4d8); 
-            // Blade Base
             g.moveTo(0, -20); g.lineTo(-10, -30); g.lineTo(10, -30); g.fill(0xffd700); 
-            // Blades
             g.beginPath();
             g.moveTo(0, -30); g.lineTo(-4, -80); g.lineTo(4, -80); g.fill(0xe2e8f0); 
             g.moveTo(-8, -30); g.quadraticCurveTo(-20, -40, -12, -60); g.lineTo(-8, -30); g.fill(0xe2e8f0);
@@ -1021,7 +1033,7 @@ export class GameEngine {
             b.state = 'IDLE';
             b.orbitAngle = dupeIndex * (Math.PI); 
             b.attackTimer = 0;
-            b.scale.set(1.2);
+            b.scale.set(1.2 * scaleMod);
         }
         else if (conf.projectileType === 'projectile') {
             g.circle(0,0, 5).fill(0xffffff); 
@@ -1036,7 +1048,7 @@ export class GameEngine {
         b.vx = Math.cos(angle) * speed;
         b.vy = Math.sin(angle) * speed;
         
-        b.damage = conf.baseDamage * this.stats.damageMultiplier * (flags.giant ? 1.5 : 1);
+        b.damage = conf.baseDamage * this.stats.damageMultiplier * scaleMod;
         b.element = conf.element;
         b.duration = life;
         b.maxDuration = life;
@@ -1050,6 +1062,7 @@ export class GameEngine {
         b.pierce = (conf.projectileType === 'area' || conf.element === ElementType.FIRE || conf.element === ElementType.WIND || conf.projectileType === 'water_snake') ? 999 : 1;
         b.color = conf.color;
         b.trailTimer = 0;
+        b.giantCount = flags.giantCount;
 
         this.bullets.push(b);
         this.world.addChild(b);
@@ -1072,12 +1085,18 @@ export class GameEngine {
                 e.tint = 0xffffff;
             }
 
+            // Animation Squeeze
+            e.animOffset += delta * 0.2;
+            const squeeze = Math.sin(e.animOffset) * 0.1;
+            e.scale.x = e.baseScale * (1 + squeeze);
+            e.scale.y = e.baseScale * (1 - squeeze);
+
             // Boss AI
             if (e.isBoss && e.bossActionTimer !== undefined) {
                 e.bossActionTimer -= delta;
                 if (e.bossActionTimer <= 0) {
                     this.bossAttack(e);
-                    e.bossActionTimer = Math.max(30, 120 - this.wave); // Faster as wave increases
+                    e.bossActionTimer = Math.max(30, 120 - this.wave); 
                 }
             }
 
@@ -1086,7 +1105,11 @@ export class GameEngine {
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             let moveSpeed = (1 + (this.wave * 0.005)) * delta;
-            if (e.isBoss) moveSpeed *= 0.5; // Bosses are slower
+            
+            // Adjust speed by type
+            if (e.enemyType === 'bat') moveSpeed *= 1.5;
+            if (e.enemyType === 'skull') moveSpeed *= 0.7;
+            if (e.isBoss) moveSpeed *= 0.5;
 
             e.knockbackVx *= 0.85; 
             e.knockbackVy *= 0.85;
@@ -1138,21 +1161,11 @@ export class GameEngine {
     }
 
     bossAttack(boss: Entity) {
-        // Simple boss skill: Shoot at player
         const angle = Math.atan2(this.player.y - boss.y, this.player.x - boss.x);
-        
-        // Use Bullet system but owned by enemy? 
-        // Currently bullets only hurt enemies. 
-        // For simplicity in this iteration, bosses just spawn a red damaging zone or simple particle logic?
-        // Or we just rely on contact damage.
-        
-        // Let's make bosses dash or summon particles.
         if (boss.bossType === 5) { // Dasher
              boss.knockbackVx = Math.cos(angle) * 15;
              boss.knockbackVy = Math.sin(angle) * 15;
         } else {
-            // Spawn a visual warning that doesn't hurt yet (or simple projectiles if we added enemy bullets)
-            // Since we don't have EnemyBullet class, let's just make them surge forward.
              boss.knockbackVx = Math.cos(angle) * 5;
              boss.knockbackVy = Math.sin(angle) * 5;
         }
@@ -1162,44 +1175,76 @@ export class GameEngine {
         this.bullets.forEach(b => {
             if (b.isDead || b.destroyed) return;
             
+            // --- Universal Wobble Logic ---
+            if (b.isWobble) {
+                if (b.wobblePhase === undefined) b.wobblePhase = 0;
+                b.wobblePhase += 0.2 * delta;
+                
+                // For directional things (projectiles, snakes)
+                if (b.vx !== 0 || b.vy !== 0) {
+                    const len = Math.hypot(b.vx, b.vy);
+                    if (len > 0) {
+                        const px = -b.vy / len;
+                        const py = b.vx / len;
+                        const offset = Math.sin(b.wobblePhase) * 2 * delta;
+                        b.x += b.vx * delta + px * offset;
+                        b.y += b.vy * delta + py * offset;
+                        // Don't return, allow other updates
+                    }
+                } 
+                // For static things (Wind/Fire/Area), we might want to jiggle position
+                else if (b.element === ElementType.FIRE || b.element === ElementType.WIND) {
+                     b.x = this.player.x + Math.sin(b.wobblePhase) * 5;
+                     b.y = this.player.y + Math.cos(b.wobblePhase) * 5;
+                }
+            } else {
+                // Normal movement if not wobbling directional
+                 if (b.vx !== 0 || b.vy !== 0 && !b.isWobble) {
+                    b.x += b.vx * delta;
+                    b.y += b.vy * delta;
+                 }
+            }
+
             // --- Visual Expansions ---
             if (b.element === ElementType.WIND) {
-                b.scale.x += 0.08 * delta; // Grow fast
-                b.scale.y += 0.08 * delta;
+                // Ensure giant scale is respected in growth
+                const growth = 0.08 * delta;
+                b.scale.x += growth; 
+                b.scale.y += growth;
                 b.alpha -= 0.02 * delta;
                 if (b.alpha <= 0) this.killBullet(b);
                 b.duration -= delta;
                 return; 
             }
             if (b.element === ElementType.FIRE) {
-                 // Plasma Animation
                  const g = b.children[0] as Graphics;
                  g.clear();
-                 
-                 const t = 1 - (b.duration / b.maxDuration); // 0 to 1
+                 const t = 1 - (b.duration / b.maxDuration); 
                  const currentRadius = b.radius * (0.5 + t * 0.5);
                  
-                 // Draw multiple overlapping circles for plasma look
                  for(let i=0; i<5; i++) {
                      const offset = Math.random() * 10;
                      const a = Math.random() * Math.PI * 2;
                      const ox = Math.cos(a) * offset;
                      const oy = Math.sin(a) * offset;
-                     // Color jitter
                      const col = Math.random() > 0.5 ? 0xff4500 : 0xffaa00;
                      g.circle(ox, oy, currentRadius * (0.5 + Math.random()*0.5)).fill({color: col, alpha: 0.3});
                  }
                  
-                 b.scale.set(1 + t * 1); // Expand
+                 // Apply giant to the time-based expansion
+                 const baseScale = 1 + (b.giantCount || 0) * 0.5;
+                 b.scale.set(baseScale * (1 + t * 1)); 
+                 
                  b.alpha = 1 - t;
                  b.duration -= delta;
                  if (b.duration <= 0) this.killBullet(b);
                  return;
             }
             
-            // --- Water Snake Logic ---
             if (b.snakeTimer !== undefined) {
-                b.scale.set(Math.max(0.1, b.duration / 60));
+                // Scale based on giant count too
+                const baseScale = 1 + (b.giantCount || 0) * 0.5;
+                b.scale.set(Math.max(0.1, b.duration / 60) * baseScale);
                 
                 b.snakeTimer += delta;
                 if (b.snakeTimer > 2) { 
@@ -1222,8 +1267,11 @@ export class GameEngine {
                 }
                 
                 b.rotation += Math.sin(b.duration * 0.2) * 0.05;
-                b.vx = Math.cos(b.rotation) * 6; 
-                b.vy = Math.sin(b.rotation) * 6;
+                // Wobble handled above generic check, but snake needs direction update
+                if (!b.isWobble) {
+                    b.vx = Math.cos(b.rotation) * 6; 
+                    b.vy = Math.sin(b.rotation) * 6;
+                }
             }
             
             b.duration -= delta;
@@ -1232,7 +1280,6 @@ export class GameEngine {
                 return;
             }
 
-            // --- Trails ---
             if (b.vx !== 0 || b.vy !== 0) {
                 b.trailTimer -= delta;
                 if (b.trailTimer <= 0) {
@@ -1318,8 +1365,8 @@ export class GameEngine {
                 }
                 if (Math.floor(this.gameTime) % 10 === 0) b.hitList.clear();
             }
-            // --- Standard Projectiles ---
-            else if (b.isTracking) {
+            // --- Standard Projectiles Tracking ---
+            else if (b.isTracking && !b.isWobble) {
                 let nearest = null;
                 let minDst = 1000;
                 for (const e of this.enemies) {
@@ -1331,22 +1378,6 @@ export class GameEngine {
                     const angle = Math.atan2(nearest.y - b.y, nearest.x - b.x);
                     b.vx = b.vx * 0.9 + Math.cos(angle) * 2;
                     b.vy = b.vy * 0.9 + Math.sin(angle) * 2;
-                }
-                b.x += b.vx * delta;
-                b.y += b.vy * delta;
-            } else {
-                if (b.isWobble) {
-                    if (b.wobblePhase === undefined) b.wobblePhase = 0;
-                    b.wobblePhase += 0.2 * delta;
-                    const len = Math.hypot(b.vx, b.vy);
-                    if (len > 0) {
-                        const px = -b.vy / len;
-                        const py = b.vx / len;
-                        const offset = Math.sin(b.wobblePhase) * 2 * delta;
-                        b.x += b.vx * delta + px * offset;
-                        b.y += b.vy * delta + py * offset;
-                        return; 
-                    }
                 }
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
@@ -1474,6 +1505,7 @@ export class GameEngine {
                 if (b.hitList.has(this.getObjectId(e))) continue;
 
                 let hitRadius = b.radius;
+                // Scale hitbox for wind/water
                 if (b.element === ElementType.WIND || b.element === ElementType.WATER) hitRadius *= b.scale.x; 
                 
                 if (b.ownerId.startsWith('art_track') && b.state !== 'SLASH') continue;
@@ -1513,6 +1545,7 @@ export class GameEngine {
 
         if (b.element === ElementType.FIRE) {
             e.isBurning = true;
+            // Water cuts fire check
             if (e.isWet) { e.isBurning = false; }
         }
 
@@ -1521,7 +1554,14 @@ export class GameEngine {
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
             e.knockbackVx += Math.cos(angle) * 5; 
             e.knockbackVy += Math.sin(angle) * 5;
-            if (e.isBurning) { e.isBurning = false; dmg *= 0.5; }
+            
+            // Interaction: Water Extinguishes Fire (Steam)
+            if (e.isBurning) { 
+                e.isBurning = false; 
+                dmg *= 1.5; // Steam Damage Bonus
+                this.spawnText("STEAM!", e.x, e.y - 30, 0xffffff);
+                this.spawnParticle(e.x, e.y, 0xaaaaaa, 5);
+            }
         }
 
         if (dmg > 0) {

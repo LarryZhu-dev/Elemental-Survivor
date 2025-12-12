@@ -3,13 +3,18 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine';
 import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
 import { getRandomCard, ALL_CARDS } from './constants';
-import Muuri from 'muuri';
 
 // Extend window for gm
 declare global {
     interface Window {
         gm: () => void;
     }
+}
+
+// Chain grouping helper
+interface CardChain {
+    cards: { card: CardDef; index: number; isExcess?: boolean }[];
+    isComplete: boolean; // Ended with a weapon
 }
 
 const App = () => {
@@ -21,13 +26,9 @@ const App = () => {
   const [levelUpOptions, setLevelUpOptions] = useState<CardDef[]>([]);
   const [bossWarning, setBossWarning] = useState<string | null>(null);
   const [aimStatus, setAimStatus] = useState<string>("自动");
-  const [selectedCard, setSelectedCard] = useState<CardDef | null>(null);
+  const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [isGmMode, setIsGmMode] = useState(false);
   
-  // Muuri Grid Ref
-  const gridRef = useRef<Muuri | null>(null);
-  const gridElementRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
      window.gm = () => {
          setIsGmMode(prev => !prev);
@@ -86,58 +87,6 @@ const App = () => {
     };
   }, []);
 
-  // Initialize Muuri when entering Pause state
-  useEffect(() => {
-    if (gameState === GameState.PAUSED && gridElementRef.current && !gridRef.current) {
-        setTimeout(() => {
-            if (!gridElementRef.current) return;
-            gridRef.current = new Muuri(gridElementRef.current, {
-                dragEnabled: true,
-                layout: {
-                    fillGaps: true
-                },
-                dragSort: true,
-                dragStartPredicate: {
-                    distance: 10,
-                    delay: 0,
-                }
-            });
-            
-            gridRef.current.on('dragEnd', () => {
-               syncInventoryFromMuuri(); 
-            });
-
-        }, 100);
-    }
-
-    return () => {
-        if (gameState !== GameState.PAUSED && gridRef.current) {
-            gridRef.current.destroy();
-            gridRef.current = null;
-        }
-    };
-  }, [gameState]);
-
-  const syncInventoryFromMuuri = () => {
-      if (!gridRef.current || !engineRef.current || !stats) return;
-      
-      const items = gridRef.current.getItems();
-      const newInventory: CardDef[] = [];
-      
-      items.forEach(item => {
-          const el = item.getElement();
-          if (el) {
-              const id = el.getAttribute('data-id');
-              const card = stats.inventory.find(c => c.id === id);
-              if (card) newInventory.push(card);
-          }
-      });
-      
-      if (newInventory.length === stats.inventory.length) {
-          setStats({ ...stats, inventory: newInventory });
-      }
-  }
-
   const startGame = (mapType: MapType) => {
     engineRef.current?.start(mapType);
   };
@@ -171,140 +120,141 @@ const App = () => {
   };
 
   const handleResume = () => {
-      syncInventoryFromMuuri();
       if (stats) {
          engineRef.current?.reorderInventory(stats.inventory);
       }
-
       setGameState(GameState.PLAYING);
       engineRef.current?.resume();
-      
-      if (gridRef.current) {
-          gridRef.current.destroy();
-          gridRef.current = null;
-      }
-      setSelectedCard(null);
+      setSelectedCardIndex(null);
   };
 
-  // Helper to determine Groups for rendering chain borders
-  const calculateCardGroups = () => {
-      if (!stats) return new Map<number, string>();
-      
-      const slotClasses = new Map<number, string>();
-      let activeEffects: { count: number, id: string }[] = [];
-      
+  // Inventory logic: Group into chains
+  const getChains = (): CardChain[] => {
+      if (!stats) return [];
+      const chains: CardChain[] = [];
+      let currentChain: { card: CardDef; index: number; isExcess?: boolean }[] = [];
+      let activeEffects: { logic: string, count: number }[] = [];
+
       stats.inventory.forEach((card, index) => {
-          // Identify if this card is affected by previous effects
-          if (activeEffects.length > 0) {
-              // Mark as affected
-              slotClasses.set(index, (slotClasses.get(index) || "") + " chain-affected");
+          // Check limits for visual "Excess" styling
+          let isExcess = false;
+          if (card.type === CardType.EFFECT && card.effectConfig?.logic === 'double') {
+              // Count current doubles in activeEffects
+              const doubleCount = activeEffects.filter(e => e.logic === 'double').length;
+              // If we already have 2 "double" mods active (resulting in 4x), more are excess
+              if (doubleCount >= 2) isExcess = true;
           }
 
-          // Execution count logic (same as engine)
-          let executionCount = 1;
-          activeEffects.forEach(eff => {
-              if (eff.id.includes('double')) executionCount *= 2;
-          });
-          executionCount = Math.min(executionCount, 4);
+          currentChain.push({ card, index, isExcess });
 
-          // Add New Effects
-          if (card.type === CardType.EFFECT && card.effectConfig) {
-             slotClasses.set(index, (slotClasses.get(index) || "") + " chain-start"); // Source
-             
-             for(let i=0; i<executionCount; i++) {
-                 activeEffects.push({
-                     count: card.effectConfig.influenceCount,
-                     id: card.id
-                 });
-             }
+          // Add to effects logic tracking
+          if (card.type === CardType.EFFECT && card.effectConfig && !isExcess) {
+              // Apply Double Cast Multiplier logic to count
+              let count = card.effectConfig.influenceCount;
+              // Calc how many times this effect repeats based on PREVIOUS doubles
+              let multiplier = 1;
+              activeEffects.forEach(e => { if (e.logic === 'double') multiplier *= 2; });
+              multiplier = Math.min(multiplier, 4);
+
+              // Add this effect to tracking
+              for(let i=0; i<multiplier; i++) {
+                 activeEffects.push({ logic: card.effectConfig.logic, count: count });
+              }
           }
-
-          // Decrement Effects
-          const isArtifact = card.type === CardType.ARTIFACT;
-          activeEffects.forEach(eff => {
-               if (eff.id.includes('double')) eff.count--;
-               else if (isArtifact) eff.count--;
-          });
           
-          // Check for expired effects to mark this index as "chain-end" for that effect
-          // This is purely visual approximation. 
-          const justFinished = activeEffects.filter(eff => eff.count === 0);
-          if (justFinished.length > 0) {
-              slotClasses.set(index, (slotClasses.get(index) || "") + " chain-end");
+          if (card.type === CardType.ARTIFACT) {
+              // Artifact closes the chain
+              chains.push({ cards: currentChain, isComplete: true });
+              currentChain = [];
+              
+              // Decrement effects logic (artifacts consume 1 charge of everything)
+               activeEffects.forEach(eff => {
+                  eff.count--;
+               });
+               activeEffects = activeEffects.filter(eff => eff.count > 0);
           }
-
-          activeEffects = activeEffects.filter(eff => eff.count > 0);
       });
-      return slotClasses;
-  };
 
-  const slotClasses = calculateCardGroups();
+      // Dangling chain (modifiers without weapon at the end)
+      if (currentChain.length > 0) {
+          chains.push({ cards: currentChain, isComplete: false });
+      }
 
-  const renderInventory = () => {
-      if (!stats) return null;
+      return chains;
+  }
 
-      return stats.inventory.map((card, index) => {
-          const cls = slotClasses.get(index) || "";
-          
-          return (
-            <div
-                key={card.id}
-                data-id={card.id}
-                className={`inv-slot rarity-${card.rarity} ${cls}`}
-                onClick={() => setSelectedCard(card)}
-            >
-                <div className="inv-slot-content w-full h-full flex items-center justify-center relative pointer-events-none">
-                    {card.type === CardType.EFFECT && <span className="badge badge-effect">E</span>}
-                    {card.type === CardType.BUFF && <span className="badge badge-buff">B</span>}
-                    
-                    <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
-                        {card.name.substring(0, 2)}
-                    </span>
-                </div>
-            </div>
-          );
-      });
+  const handleSlotClick = (index: number) => {
+      if (selectedCardIndex === null) {
+          setSelectedCardIndex(index);
+      } else {
+          // Swap
+          if (stats) {
+              const newInv = [...stats.inventory];
+              const temp = newInv[selectedCardIndex];
+              newInv[selectedCardIndex] = newInv[index];
+              newInv[index] = temp;
+              setStats({ ...stats, inventory: newInv });
+              setSelectedCardIndex(null);
+          }
+      }
   }
 
   return (
     <div className="app-container">
       <style>{`
         /* Chain Grouping Visuals */
-        .chain-start {
-            border-left: 3px solid #a855f7 !important;
-            border-top: 3px solid #a855f7 !important;
-            border-bottom: 3px solid #a855f7 !important;
-            border-right: none !important;
-            border-top-right-radius: 0 !important;
-            border-bottom-right-radius: 0 !important;
-            margin-right: -2px !important;
-            z-index: 5;
-            box-shadow: -2px 0 10px rgba(168, 85, 247, 0.4);
+        .chain-row {
+            display: flex;
+            background: rgba(0,0,0,0.5);
+            border: 1px solid #444;
+            padding: 8px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            align-items: center;
+            min-height: 80px;
         }
-        .chain-affected {
-            border-top: 3px solid #22d3ee !important;
-            border-bottom: 3px solid #22d3ee !important;
-            border-left: none !important;
-            border-right: none !important;
-            border-radius: 0 !important;
-            margin-left: -2px !important;
-            margin-right: -2px !important;
-            background-color: rgba(34, 211, 238, 0.05);
-            z-index: 4;
+        .chain-row.incomplete {
+            border-style: dashed;
+            background: rgba(50,0,0,0.3);
         }
-        .chain-end {
-            border-right: 3px solid #22d3ee !important;
-            border-top: 3px solid #22d3ee !important;
-            border-bottom: 3px solid #22d3ee !important;
-            border-top-left-radius: 0 !important;
-            border-bottom-left-radius: 0 !important;
-            margin-left: -2px !important;
-            z-index: 5;
+        .chain-arrow {
+            color: #666;
+            margin: 0 4px;
+            font-size: 20px;
         }
-        /* Overrides for items that are both Start and End or Affected */
-        .chain-start.chain-affected {
-             border-top: 3px solid #a855f7 !important; /* purple overrides blue */
-             border-bottom: 3px solid #a855f7 !important;
+        .inv-slot {
+            width: 4rem;
+            height: 4rem;
+            margin-right: 8px;
+            border: 2px solid #555;
+            background-color: #334155;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .inv-slot:hover {
+            transform: translateY(-2px);
+            border-color: white;
+        }
+        .inv-slot.selected {
+            border-color: #facc15;
+            box-shadow: 0 0 10px #facc15;
+            z-index: 10;
+        }
+        .inv-slot.excess {
+            opacity: 0.4;
+            border-color: #ef4444;
+        }
+        .slot-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #22d3ee;
+            color: black;
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 4px;
+            font-weight: bold;
         }
       `}</style>
       <canvas ref={canvasRef} className="absolute inset-0" />
@@ -444,38 +394,63 @@ const App = () => {
       {/* --- PAUSE / INVENTORY --- */}
       {gameState === GameState.PAUSED && stats && (
          <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
-           <h2 className="pause-title mb-4">暂停 / 装备调整</h2>
-           <p className="pause-desc mb-8">
-             拖动卡片调整顺序。效果卡会与受影响卡片形成边框连接。<br/>
-             <span className="text-purple-400">紫色起始</span>，<span className="text-cyan-400">青色范围</span>。
+           <h2 className="pause-title mb-4">法术链调整</h2>
+           <p className="pause-desc mb-4">
+             每一行代表一个独立的法术作用域。点击卡片选中，再次点击交换位置。
            </p>
            
-           <div className="pause-layout">
-               <div ref={gridElementRef} className="inv-grid">
-                 {renderInventory()}
+           <div className="pause-layout items-start h-[70vh]">
+               <div className="overflow-y-auto pr-2" style={{ width: '700px', maxHeight: '60vh' }}>
+                 {getChains().map((chain, chainIdx) => (
+                    <div key={chainIdx} className={`chain-row ${!chain.isComplete ? 'incomplete' : ''}`}>
+                        {chain.cards.map((item, i) => (
+                            <React.Fragment key={item.card.id + i}>
+                                <div 
+                                    className={`inv-slot flex flex-col items-center justify-center rarity-${item.card.rarity} ${selectedCardIndex === item.index ? 'selected' : ''} ${item.isExcess ? 'excess' : ''}`}
+                                    onClick={() => handleSlotClick(item.index)}
+                                >
+                                    {item.card.type === CardType.EFFECT && <div className="slot-badge" style={{background: '#d946ef', color: 'white'}}>EF</div>}
+                                    {item.card.type === CardType.BUFF && <div className="slot-badge">BF</div>}
+                                    <span style={{ color: item.card.iconColor, fontWeight: 'bold' }}>{item.card.name.substring(0,2)}</span>
+                                </div>
+                                {/* Draw subtle arrow if not last */}
+                                {i < chain.cards.length - 1 && <span className="chain-arrow">→</span>}
+                            </React.Fragment>
+                        ))}
+                        {!chain.isComplete && <span className="text-gray-500 text-sm ml-4 italic">(缺少核心法器)</span>}
+                    </div>
+                 ))}
+                 
+                 {/* Placeholder for empty */}
+                 {stats.inventory.length === 0 && <div className="text-gray-500 text-center mt-10">空空如也</div>}
                </div>
 
                {/* Details Panel */}
                <div className="details-panel">
-                   {selectedCard ? (
+                   {selectedCardIndex !== null && stats.inventory[selectedCardIndex] ? (
                        <>
-                           <div className="details-title" style={{ color: selectedCard.iconColor }}>
-                               {selectedCard.name}
+                           <div className="details-title" style={{ color: stats.inventory[selectedCardIndex].iconColor }}>
+                               {stats.inventory[selectedCardIndex].name}
                            </div>
-                           <div className="details-type">{selectedCard.rarity} {selectedCard.type}</div>
-                           <div className="details-desc">{selectedCard.description}</div>
+                           <div className="details-type">{stats.inventory[selectedCardIndex].rarity} {stats.inventory[selectedCardIndex].type}</div>
+                           <div className="details-desc">{stats.inventory[selectedCardIndex].description}</div>
+                           <div className="mt-4 text-sm text-gray-400">
+                               {stats.inventory[selectedCardIndex].type === CardType.ARTIFACT 
+                                ? "法术核心：终结当前作用域，触发法术。" 
+                                : "强化组件：必须放在法术核心之前生效。"}
+                           </div>
                        </>
                    ) : (
-                       <div className="text-gray-500 italic">点击卡片查看详情</div>
+                       <div className="text-gray-500 italic">点击卡片选中/交换</div>
                    )}
                </div>
            </div>
 
            <button 
              onClick={handleResume}
-             className="btn-resume mt-8"
+             className="btn-resume mt-4"
            >
-             继续游戏
+             保存并继续
            </button>
          </div>
       )}
