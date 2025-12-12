@@ -32,8 +32,9 @@ export enum ElementType {
   FIRE,
   WIND,
   WATER,
-  LIGHTNING,
-  LIGHTNING_BLUE // New internal element for synergy
+  LIGHTNING,      // Yellow (Mirror)
+  LIGHTNING_BLUE, // Blue (Wedge)
+  VOID            // For Bosses
 }
 
 export interface CardDef {
@@ -53,7 +54,7 @@ export interface CardDef {
     cooldown: number;
     baseDamage: number;
     element: ElementType;
-    projectileType: 'projectile' | 'beam' | 'area' | 'orbit' | 'lightning' | 'stream' | 'minion' | 'water_snake';
+    projectileType: 'projectile' | 'beam' | 'area' | 'orbit' | 'lightning' | 'stream' | 'minion' | 'water_snake' | 'pull_screen';
     color: number;
   };
   buffConfig?: {
@@ -62,7 +63,7 @@ export interface CardDef {
     frequency?: number; // Inverse cooldown
   };
   effectConfig?: {
-    logic: 'split_back' | 'reverse' | 'double' | 'ignore' | 'ring' | 'fan' | 'line' | 'track' | 'copy' | 'wobble' | 'giant' | 'lightning_buff';
+    logic: 'split_back' | 'reverse' | 'double' | 'ignore' | 'ring' | 'fan' | 'line' | 'track' | 'copy' | 'wobble' | 'giant';
     influenceCount: number; // Silver=1, Gold=2, Prismatic=3
   };
 }

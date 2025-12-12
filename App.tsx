@@ -196,16 +196,8 @@ const App = () => {
       stats.inventory.forEach((card, index) => {
           // Identify if this card is affected by previous effects
           if (activeEffects.length > 0) {
-              // Add classes based on position in chain
-              if (activeEffects.some(e => e.count > 0)) {
-                   // This slot is "middle" or "end"
-                   // We don't have perfect "end" knowledge without lookahead, but we can do:
-                   let cls = "chain-mid";
-                   // If this card consumes the last charge of the effect, it's an end
-                   // Note: Logic is complex because multiple effects can overlap.
-                   // Simplified: Mark as affected.
-                   slotClasses.set(index, (slotClasses.get(index) || "") + " chain-affected");
-              }
+              // Mark as affected
+              slotClasses.set(index, (slotClasses.get(index) || "") + " chain-affected");
           }
 
           // Execution count logic (same as engine)
@@ -213,14 +205,12 @@ const App = () => {
           activeEffects.forEach(eff => {
               if (eff.id.includes('double')) executionCount *= 2;
           });
-          executionCount = Math.min(executionCount, 128);
+          executionCount = Math.min(executionCount, 4);
 
           // Add New Effects
           if (card.type === CardType.EFFECT && card.effectConfig) {
              slotClasses.set(index, (slotClasses.get(index) || "") + " chain-start"); // Source
              
-             // Look ahead to find end index for CSS border logic?
-             // It's easier to just push to stack and decrement.
              for(let i=0; i<executionCount; i++) {
                  activeEffects.push({
                      count: card.effectConfig.influenceCount,
@@ -238,7 +228,6 @@ const App = () => {
           
           // Check for expired effects to mark this index as "chain-end" for that effect
           // This is purely visual approximation. 
-          // If an effect just reached 0, this card was the last one.
           const justFinished = activeEffects.filter(eff => eff.count === 0);
           if (justFinished.length > 0) {
               slotClasses.set(index, (slotClasses.get(index) || "") + " chain-end");
@@ -286,32 +275,36 @@ const App = () => {
             border-top: 3px solid #a855f7 !important;
             border-bottom: 3px solid #a855f7 !important;
             border-right: none !important;
-            border-radius: 8px 0 0 8px;
-            margin-right: 0 !important;
-            box-shadow: -5px 0 10px rgba(168, 85, 247, 0.4);
+            border-top-right-radius: 0 !important;
+            border-bottom-right-radius: 0 !important;
+            margin-right: -2px !important;
+            z-index: 5;
+            box-shadow: -2px 0 10px rgba(168, 85, 247, 0.4);
         }
         .chain-affected {
             border-top: 3px solid #22d3ee !important;
             border-bottom: 3px solid #22d3ee !important;
             border-left: none !important;
             border-right: none !important;
-            border-radius: 0;
-            margin-left: 0 !important;
-            margin-right: 0 !important;
+            border-radius: 0 !important;
+            margin-left: -2px !important;
+            margin-right: -2px !important;
             background-color: rgba(34, 211, 238, 0.05);
+            z-index: 4;
         }
         .chain-end {
             border-right: 3px solid #22d3ee !important;
             border-top: 3px solid #22d3ee !important;
             border-bottom: 3px solid #22d3ee !important;
-            border-radius: 0 8px 8px 0;
-            margin-left: 0 !important;
+            border-top-left-radius: 0 !important;
+            border-bottom-left-radius: 0 !important;
+            margin-left: -2px !important;
+            z-index: 5;
         }
-        /* Fix spacing when chained */
-        .chain-start + .chain-affected, 
-        .chain-affected + .chain-affected,
-        .chain-affected + .chain-end {
-            margin-left: -5px !important; /* Pull them together */
+        /* Overrides for items that are both Start and End or Affected */
+        .chain-start.chain-affected {
+             border-top: 3px solid #a855f7 !important; /* purple overrides blue */
+             border-bottom: 3px solid #a855f7 !important;
         }
       `}</style>
       <canvas ref={canvasRef} className="absolute inset-0" />
@@ -381,7 +374,7 @@ const App = () => {
 
       {/* --- GM PANEL --- */}
       {isGmMode && (
-          <div className="gm-panel z-100">
+          <div className="gm-panel z-100 pointer-events-auto">
               <div className="gm-header flex justify-between">
                   <span>GM DEBUG PANEL</span>
                   <button className="btn-sm" onClick={() => setIsGmMode(false)}>X</button>
