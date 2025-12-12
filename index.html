@@ -299,15 +299,6 @@
         gap: 2rem;
         align-items: flex-start;
       }
-
-      .inv-grid {
-        position: relative; /* Required for Muuri */
-        width: 700px;
-        padding: 1rem;
-        border: 2px solid #4b5563; /* gray-600 */
-        background-color: #111827; /* gray-900 */
-        min-height: 300px;
-      }
       
       /* Inventory Slot with Rarity Borders */
       .inv-slot {
@@ -319,17 +310,48 @@
         justify-content: center;
         font-size: 0.75rem; /* xs */
         text-align: center;
-        cursor: pointer;
-        position: absolute; /* Muuri requires absolute positioning for items */
+        cursor: grab;
         box-sizing: border-box;
-        margin: 5px; /* Margin for muuri gaps */
+        margin: 5px; 
         z-index: 1;
-        /* Default border */
         border: 2px solid #555;
-        transition: box-shadow 0.2s, border-color 0.2s;
+        transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
         box-shadow: 0 0 5px rgba(0,0,0,0.5);
       }
       
+      .inv-slot:active { cursor: grabbing; }
+
+      /* Drag and Drop Visuals */
+      .inv-slot.is-dragging {
+        opacity: 0.4;
+        border-style: dashed;
+        transform: scale(0.9);
+      }
+      
+      .inv-slot.drop-target-before {
+        border-left: 4px solid #fde047; /* yellow-300 */
+        margin-left: 5px; /* Visual shift */
+      }
+
+      .append-zone {
+        width: 100%;
+        height: 4rem;
+        border: 2px dashed #4b5563;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #9ca3af;
+        margin-top: 1rem;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+      .append-zone:hover, .append-zone.drag-over {
+        background-color: rgba(255, 255, 255, 0.1);
+        border-color: #fde047;
+        color: white;
+      }
+
       /* Always show slight glow in inventory too */
       .inv-slot.rarity-silver { border-color: #cbd5e1; box-shadow: 0 0 8px rgba(203, 213, 225, 0.3); }
       .inv-slot.rarity-gold { border-color: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.3); }
@@ -341,52 +363,6 @@
         background-size: 200% 200%;
         animation: holographic-shift 3s linear infinite;
         box-shadow: 0 0 8px rgba(217, 70, 239, 0.4);
-      }
-
-      .inv-slot:active { cursor: grabbing; }
-      .inv-slot.muuri-item-dragging {
-        z-index: 10;
-        box-shadow: 0 15px 30px rgba(0,0,0,0.9);
-        transform: scale(1.1);
-      }
-      
-      /* Effect Range Highlight */
-      /* The source card (Effect Card) */
-      .inv-slot.is-effect-source {
-         border-color: #a855f7 !important; /* purple-500 */
-         box-shadow: 0 0 15px #a855f7 !important;
-         z-index: 2;
-      }
-      /* Link/Arrow hint for Source */
-      .inv-slot.is-effect-source::after {
-        content: '➜';
-        position: absolute;
-        right: -8px;
-        top: 50%;
-        transform: translateY(-50%);
-        color: #a855f7;
-        font-size: 14px;
-        text-shadow: 0 0 5px black;
-        z-index: 20;
-      }
-
-      /* The affected card */
-      .inv-slot.is-affected {
-        /* Dashed Cyan border to indicate being modified */
-        border: 2px dashed #22d3ee !important; /* cyan-400 */
-        background-color: rgba(34, 211, 238, 0.1);
-      }
-      /* Bracket look */
-      .inv-slot.is-affected::before {
-        content: '';
-        position: absolute;
-        top: -4px; bottom: -4px; left: -4px; right: -4px;
-        border: 2px solid #22d3ee;
-        border-radius: 6px;
-        opacity: 0.6;
-        pointer-events: none;
-        box-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
-        z-index: 5;
       }
 
       .badge {
@@ -532,7 +508,6 @@
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "pixi.js": "https://esm.sh/pixi.js@^8.14.3",
-    "muuri": "https://esm.sh/muuri@0.9.5",
     "web-animations-js": "https://esm.sh/web-animations-js@2.3.2"
   }
 }

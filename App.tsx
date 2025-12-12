@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine';
 import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
@@ -26,8 +25,12 @@ const App = () => {
   const [levelUpOptions, setLevelUpOptions] = useState<CardDef[]>([]);
   const [bossWarning, setBossWarning] = useState<string | null>(null);
   const [aimStatus, setAimStatus] = useState<string>("自动");
-  const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [isGmMode, setIsGmMode] = useState(false);
+  
+  // Drag and Drop State
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  const [isDragOverAppend, setIsDragOverAppend] = useState(false);
   
   useEffect(() => {
      window.gm = () => {
@@ -125,7 +128,7 @@ const App = () => {
       }
       setGameState(GameState.PLAYING);
       engineRef.current?.resume();
-      setSelectedCardIndex(null);
+      setDraggedIndex(null);
   };
 
   // Inventory logic: Group into chains
@@ -183,21 +186,87 @@ const App = () => {
       return chains;
   }
 
-  const handleSlotClick = (index: number) => {
-      if (selectedCardIndex === null) {
-          setSelectedCardIndex(index);
-      } else {
-          // Swap
-          if (stats) {
-              const newInv = [...stats.inventory];
-              const temp = newInv[selectedCardIndex];
-              newInv[selectedCardIndex] = newInv[index];
-              newInv[index] = temp;
-              setStats({ ...stats, inventory: newInv });
-              setSelectedCardIndex(null);
-          }
+  // --- DRAG AND DROP HANDLERS ---
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+      setDraggedIndex(index);
+      e.dataTransfer.effectAllowed = "move";
+      // We pass the index as data
+      e.dataTransfer.setData("text/plain", index.toString());
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+      e.preventDefault(); // Necessary to allow dropping
+      if (draggedIndex === index) return;
+      setDragOverIndex(index);
+  };
+
+  const handleDragOverAppend = (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragOverAppend(true);
+      setDragOverIndex(null); // Clear specific slot target
+  };
+
+  const handleDragLeaveAppend = () => {
+      setIsDragOverAppend(false);
+  };
+
+  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
+      e.preventDefault();
+      const sourceIndexStr = e.dataTransfer.getData("text/plain");
+      const sourceIndex = parseInt(sourceIndexStr);
+
+      if (isNaN(sourceIndex) || sourceIndex === targetIndex) {
+          setDraggedIndex(null);
+          setDragOverIndex(null);
+          return;
       }
-  }
+
+      if (stats) {
+          const newInv = [...stats.inventory];
+          const [movedItem] = newInv.splice(sourceIndex, 1);
+          
+          // Logic: "Insert Before"
+          // If we drag from index 5 to index 2:
+          // Remove 5. Array shrinks. Index 2 is still valid (was 2, now 2). Insert at 2.
+          // If we drag from index 1 to index 4:
+          // Remove 1. Array shrinks. Index 4 becomes 3. We want to insert where 4 WAS.
+          
+          let insertionIndex = targetIndex;
+          if (sourceIndex < targetIndex) {
+              insertionIndex = targetIndex - 1;
+          }
+          
+          newInv.splice(insertionIndex, 0, movedItem);
+          setStats({ ...stats, inventory: newInv });
+      }
+
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+  };
+
+  const handleDropAppend = (e: React.DragEvent) => {
+      e.preventDefault();
+      const sourceIndexStr = e.dataTransfer.getData("text/plain");
+      const sourceIndex = parseInt(sourceIndexStr);
+
+      if (!isNaN(sourceIndex) && stats) {
+          const newInv = [...stats.inventory];
+          const [movedItem] = newInv.splice(sourceIndex, 1);
+          newInv.push(movedItem);
+          setStats({ ...stats, inventory: newInv });
+      }
+
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      setIsDragOverAppend(false);
+  };
+
+  const handleDragEnd = () => {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      setIsDragOverAppend(false);
+  };
+
 
   return (
     <div className="app-container">
@@ -223,23 +292,7 @@ const App = () => {
             font-size: 20px;
         }
         .inv-slot {
-            width: 4rem;
-            height: 4rem;
             margin-right: 8px;
-            border: 2px solid #555;
-            background-color: #334155;
-            position: relative;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .inv-slot:hover {
-            transform: translateY(-2px);
-            border-color: white;
-        }
-        .inv-slot.selected {
-            border-color: #facc15;
-            box-shadow: 0 0 10px #facc15;
-            z-index: 10;
         }
         .inv-slot.excess {
             opacity: 0.4;
@@ -396,7 +449,8 @@ const App = () => {
          <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
            <h2 className="pause-title mb-4">法术链调整</h2>
            <p className="pause-desc mb-4">
-             每一行代表一个独立的法术作用域。点击卡片选中，再次点击交换位置。
+             拖动卡片以重新排序。所有卡片自左向右依次触发，遇到法器则释放法术。<br/>
+             跨行拖动可重组法术链。
            </p>
            
            <div className="pause-layout items-start h-[70vh]">
@@ -404,10 +458,18 @@ const App = () => {
                  {getChains().map((chain, chainIdx) => (
                     <div key={chainIdx} className={`chain-row ${!chain.isComplete ? 'incomplete' : ''}`}>
                         {chain.cards.map((item, i) => (
-                            <React.Fragment key={item.card.id + i}>
+                            <React.Fragment key={item.card.id + item.index}>
                                 <div 
-                                    className={`inv-slot flex flex-col items-center justify-center rarity-${item.card.rarity} ${selectedCardIndex === item.index ? 'selected' : ''} ${item.isExcess ? 'excess' : ''}`}
-                                    onClick={() => handleSlotClick(item.index)}
+                                    className={`inv-slot flex flex-col items-center justify-center rarity-${item.card.rarity} 
+                                        ${item.isExcess ? 'excess' : ''}
+                                        ${draggedIndex === item.index ? 'is-dragging' : ''}
+                                        ${dragOverIndex === item.index ? 'drop-target-before' : ''}
+                                    `}
+                                    draggable
+                                    onDragStart={(e) => handleDragStart(e, item.index)}
+                                    onDragOver={(e) => handleDragOver(e, item.index)}
+                                    onDrop={(e) => handleDrop(e, item.index)}
+                                    onDragEnd={handleDragEnd}
                                 >
                                     {item.card.type === CardType.EFFECT && <div className="slot-badge" style={{background: '#d946ef', color: 'white'}}>EF</div>}
                                     {item.card.type === CardType.BUFF && <div className="slot-badge">BF</div>}
@@ -421,28 +483,30 @@ const App = () => {
                     </div>
                  ))}
                  
+                 {/* Append Zone (Move to end) */}
+                 {stats.inventory.length > 0 && (
+                     <div 
+                        className={`append-zone ${isDragOverAppend ? 'drag-over' : ''}`}
+                        onDragOver={handleDragOverAppend}
+                        onDragLeave={handleDragLeaveAppend}
+                        onDrop={handleDropAppend}
+                     >
+                        + 拖动至此处移动到末尾 (新建法术链)
+                     </div>
+                 )}
+                 
                  {/* Placeholder for empty */}
-                 {stats.inventory.length === 0 && <div className="text-gray-500 text-center mt-10">空空如也</div>}
+                 {stats.inventory.length === 0 && <div className="text-gray-500 text-center mt-10">背包为空</div>}
                </div>
 
-               {/* Details Panel */}
+               {/* Details Panel - Shows hovered item info if dragging, or generic info */}
                <div className="details-panel">
-                   {selectedCardIndex !== null && stats.inventory[selectedCardIndex] ? (
-                       <>
-                           <div className="details-title" style={{ color: stats.inventory[selectedCardIndex].iconColor }}>
-                               {stats.inventory[selectedCardIndex].name}
-                           </div>
-                           <div className="details-type">{stats.inventory[selectedCardIndex].rarity} {stats.inventory[selectedCardIndex].type}</div>
-                           <div className="details-desc">{stats.inventory[selectedCardIndex].description}</div>
-                           <div className="mt-4 text-sm text-gray-400">
-                               {stats.inventory[selectedCardIndex].type === CardType.ARTIFACT 
-                                ? "法术核心：终结当前作用域，触发法术。" 
-                                : "强化组件：必须放在法术核心之前生效。"}
-                           </div>
-                       </>
-                   ) : (
-                       <div className="text-gray-500 italic">点击卡片选中/交换</div>
-                   )}
+                   <div className="text-gray-500 italic">
+                        {draggedIndex !== null 
+                            ? "正在移动卡片..." 
+                            : "将鼠标悬停在卡片上查看详情，拖动调整位置。"
+                        }
+                   </div>
                </div>
            </div>
 
