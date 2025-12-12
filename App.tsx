@@ -38,7 +38,12 @@ const InventoryGrid = forwardRef(({ items, onHover }: InventoryGridProps, ref) =
     useEffect(() => {
         if (!containerRef.current) return;
 
-        // Init Muuri
+        // Ensure previous instance is cleaned up to prevent duplicates or stale layouts
+        if (gridRef.current) {
+            gridRef.current.destroy();
+        }
+
+        // Init Muuri with updated items
         gridRef.current = new Muuri(containerRef.current, {
             dragEnabled: true,
             layoutOnInit: true,
@@ -60,7 +65,7 @@ const InventoryGrid = forwardRef(({ items, onHover }: InventoryGridProps, ref) =
                 gridRef.current = null;
             }
         };
-    }, []); // Only init once. We rebuild on re-mount of parent (Pause/Resume cycle)
+    }, [items]); // Re-run when items list changes (e.g. GM add, or initial load)
 
     return (
         <div className="grid-container-wrapper">
@@ -445,7 +450,7 @@ const App = () => {
 
       {/* --- PAUSE / INVENTORY --- */}
       {gameState === GameState.PAUSED && stats && (
-         <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
+         <div className="absolute inset-0 pause-overlay z-40">
            <h2 className="pause-title mb-4">法术链调整</h2>
            <p className="pause-desc mb-4">
              拖动整理 (左到右, 上到下顺序触发)<br/>

@@ -342,11 +342,18 @@
 
       /* Inventory / Pause */
       .pause-overlay {
-        background-color: rgba(0, 0, 0, 0.9);
+        background-color: rgba(0, 0, 0, 0.95);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 4rem 1rem;
+        overflow-y: auto; /* Enable vertical scroll for tall content */
+        -webkit-overflow-scrolling: touch; /* Smooth scroll on iOS */
       }
       .pause-title {
         font-size: 2.25rem; /* 4xl */
         color: white;
+        text-align: center;
       }
       .pause-desc {
         font-size: 0.875rem; /* sm */
@@ -360,7 +367,9 @@
         gap: 2rem;
         align-items: flex-start;
         width: 100%;
+        max-width: 1000px;
         justify-content: center;
+        flex-wrap: wrap; /* Allow wrapping */
       }
       @media (max-width: 800px) {
           .pause-layout { flex-direction: column; align-items: center; gap: 1rem; }
@@ -370,18 +379,27 @@
       .grid-container-wrapper {
         width: 90vw;
         max-width: 600px;
-        height: 60vh; /* Fixed height for scrolling */
+        height: 400px; /* Default Desktop Height */
         background: rgba(0,0,0,0.3);
         border: 2px solid #333;
         border-radius: 8px;
         overflow-y: auto;
         position: relative;
+        box-sizing: border-box;
+      }
+      @media (max-width: 800px) {
+          .grid-container-wrapper {
+              width: 100%;
+              height: auto;
+              min-height: 200px;
+              max-height: 40vh; /* Don't take up too much vertical space on mobile */
+          }
       }
 
       .grid {
         position: relative;
         width: 100%;
-        min-height: 400px; 
+        min-height: 100%; 
       }
       
       .item {
@@ -461,9 +479,10 @@
         display: flex;
         flex-direction: column;
         color: white;
+        flex-shrink: 0; /* Prevent shrinking when wrapped */
       }
       @media (max-width: 800px) {
-          .details-panel { width: 90vw; height: auto; min-height: 150px; }
+          .details-panel { width: 100%; height: auto; min-height: 150px; }
       }
       .details-title { font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem; }
       .details-type { color: #9ca3af; font-size: 0.875rem; margin-bottom: 1rem; text-transform: uppercase; }
@@ -476,6 +495,7 @@
         color: white;
         font-size: 1rem;
         cursor: pointer;
+        margin-top: 1rem;
       }
       .btn-resume:hover { background-color: #22c55e; /* green-500 */ }
 
