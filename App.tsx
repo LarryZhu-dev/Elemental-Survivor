@@ -12,6 +12,8 @@ const App = () => {
   const [stats, setStats] = useState<PlayerStats | null>(null);
   const [levelUpOptions, setLevelUpOptions] = useState<CardDef[]>([]);
   const [bossWarning, setBossWarning] = useState<string | null>(null);
+  const [aimStatus, setAimStatus] = useState<string>("自动");
+  const [selectedCard, setSelectedCard] = useState<CardDef | null>(null);
   
   // Muuri Grid Ref
   const gridRef = useRef<Muuri | null>(null);
@@ -21,12 +23,11 @@ const App = () => {
   useEffect(() => {
     if (!canvasRef.current) return;
     
-    // Prevent double initialization if engine already exists (Strict Mode)
     if (engineRef.current) return;
 
     const engine = new GameEngine(
       canvasRef.current,
-      (newStats) => setStats({...newStats}), // Update stats
+      (newStats) => setStats({...newStats}), 
       (newState) => {
           setGameState(newState);
           if (newState === GameState.LEVEL_UP) {
@@ -34,9 +35,8 @@ const App = () => {
               const inv = engineRef.current?.stats.inventory || [];
               const opts: CardDef[] = [];
               
-              // Generate 3 unique options
               for(let i=0; i<3; i++) {
-                  const card = getRandomCard(wave, inv, opts); // Pass existing options to exclude list
+                  const card = getRandomCard(wave, inv, opts); 
                   opts.push(card);
               }
               
@@ -46,11 +46,13 @@ const App = () => {
       (name) => {
           setBossWarning(name);
           setTimeout(() => setBossWarning(null), 3000);
+      },
+      (isAuto) => {
+          setAimStatus(isAuto ? "自动" : "手动");
       }
     );
     engineRef.current = engine;
     
-    // Attempt initialization
     const initEngine = async () => {
         try {
             await engine.init();
@@ -62,7 +64,6 @@ const App = () => {
     initEngine();
 
     return () => {
-      // Clean up on unmount
       if (engineRef.current) {
           engineRef.current.destroy();
           engineRef.current = null;
@@ -73,7 +74,6 @@ const App = () => {
   // Initialize Muuri when entering Pause state
   useEffect(() => {
     if (gameState === GameState.PAUSED && gridElementRef.current && !gridRef.current) {
-        // Slight delay to ensure DOM is rendered
         setTimeout(() => {
             if (!gridElementRef.current) return;
             gridRef.current = new Muuri(gridElementRef.current, {
@@ -87,11 +87,24 @@ const App = () => {
                     delay: 0,
                 }
             });
+            
+            // Re-calc highlights on drag end
+            gridRef.current.on('dragEnd', () => {
+               // Trigger a re-render or state update to refresh highlights if needed
+               // For now, react state update on resume handles logic, 
+               // visuals in drag might need raw DOM manipulation or force update
+               // but react won't re-render items inside muuri easily without destruction.
+               // We will rely on static rendering of highlights based on order.
+               // Since Muuri changes DOM order, we need to sync state to see highlights update?
+               // Realtime update with Muuri + React is tricky. 
+               // For this task, we'll sync on resume, but we can try to sync on drop if we want live range updates.
+               syncInventoryFromMuuri(); 
+            });
+
         }, 100);
     }
 
     return () => {
-        // Destroy Muuri when leaving Pause state or component unmounts
         if (gameState !== GameState.PAUSED && gridRef.current) {
             gridRef.current.destroy();
             gridRef.current = null;
@@ -99,72 +112,108 @@ const App = () => {
     };
   }, [gameState]);
 
+  const syncInventoryFromMuuri = () => {
+      if (!gridRef.current || !engineRef.current || !stats) return;
+      
+      const items = gridRef.current.getItems();
+      const newInventory: CardDef[] = [];
+      
+      items.forEach(item => {
+          const el = item.getElement();
+          if (el) {
+              const id = el.getAttribute('data-id');
+              const card = stats.inventory.find(c => c.id === id);
+              if (card) newInventory.push(card);
+          }
+      });
+      
+      if (newInventory.length === stats.inventory.length) {
+          setStats({ ...stats, inventory: newInventory });
+      }
+  }
+
   const startGame = (mapType: MapType) => {
     engineRef.current?.start(mapType);
   };
 
-  const selectCard = (card: CardDef) => {
+  const selectCardForInventory = (card: CardDef) => {
     engineRef.current?.addCard(card);
     engineRef.current?.resume();
     setGameState(GameState.PLAYING);
   };
 
   const handleResume = () => {
-      // Sync Muuri order to GameState
-      if (gridRef.current && stats) {
-          const items = gridRef.current.getItems();
-          const newInventory: CardDef[] = [];
-          
-          items.forEach(item => {
-              const el = item.getElement();
-              if (el) {
-                  const id = el.getAttribute('data-id');
-                  const card = stats.inventory.find(c => c.id === id);
-                  if (card) newInventory.push(card);
-              }
-          });
-          
-          if (newInventory.length === stats.inventory.length) {
-            engineRef.current?.reorderInventory(newInventory);
-            setStats({ ...stats, inventory: newInventory });
-          }
+      syncInventoryFromMuuri();
+      if (stats) {
+         engineRef.current?.reorderInventory(stats.inventory);
       }
 
       setGameState(GameState.PLAYING);
       engineRef.current?.resume();
       
-      // Destroy Muuri explicitly
       if (gridRef.current) {
           gridRef.current.destroy();
           gridRef.current = null;
       }
+      setSelectedCard(null);
   };
 
-  // Render logic for inventory with Muuri compatibility
+  // Helper to determine if a slot is affected by previous effect cards
+  // This mimics the Engine logic to show UI hints
+  const getAffectedIndices = () => {
+      if (!stats) return new Set<number>();
+      
+      const affected = new Set<number>();
+      const activeEffects: { logic: string, count: number }[] = [];
+      
+      stats.inventory.forEach((card, index) => {
+          let executionCount = 1;
+          activeEffects.forEach(eff => {
+              if (eff.logic === 'double') executionCount *= 2;
+          });
+
+          // If this card is being influenced, mark it
+          if (activeEffects.length > 0) {
+              affected.add(index);
+          }
+
+          if (card.type === CardType.EFFECT && card.effectConfig) {
+             for(let i=0; i<executionCount; i++) {
+                 activeEffects.push({
+                     logic: card.effectConfig.logic,
+                     count: card.effectConfig.influenceCount
+                 });
+             }
+          }
+
+          // Decrement counts
+          activeEffects.forEach(eff => eff.count--);
+          for(let i=activeEffects.length-1; i>=0; i--) {
+              if (activeEffects[i].count <= 0) activeEffects.splice(i, 1);
+          }
+      });
+      return affected;
+  };
+
+  const affectedIndices = getAffectedIndices();
+
   const renderInventory = () => {
       if (!stats) return null;
 
-      return stats.inventory.map((card) => (
+      return stats.inventory.map((card, index) => (
           <div
              key={card.id}
              data-id={card.id}
-             className="inv-slot group"
-             style={{ borderColor: card.iconColor }}
+             className={`inv-slot rarity-${card.rarity} ${affectedIndices.has(index) ? 'is-affected' : ''}`}
+             onClick={() => setSelectedCard(card)}
            >
-             <div className="inv-slot-content w-full h-full flex items-center justify-center relative">
+             <div className="inv-slot-content w-full h-full flex items-center justify-center relative pointer-events-none">
                  {card.type === CardType.EFFECT && <span className="badge badge-effect">E</span>}
                  {card.type === CardType.BUFF && <span className="badge badge-buff">B</span>}
                  
                  <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
                     {card.name.substring(0, 2)}
                  </span>
-                 
-                 {/* Hover Tooltip */}
-                 <div className="tooltip">
-                    <div className="font-bold" style={{ color: card.iconColor }}>{card.name}</div>
-                    <div className="text-tiny">{card.description}</div>
-                    <div className="text-tiny text-gray-400 mt-1 uppercase">{card.rarity}</div>
-                 </div>
              </div>
            </div>
       ));
@@ -183,17 +232,12 @@ const App = () => {
               onClick={() => startGame(MapType.FIXED)}
               className="btn btn-fixed"
             >
-              固定地图 (Fixed Map)
-            </button>
-            <button 
-              onClick={() => startGame(MapType.INFINITE)}
-              className="btn btn-infinite"
-            >
-              无限地图 (Infinite Map)
+              开始游戏
             </button>
           </div>
           <div className="instructions mt-8 text-center">
-            操作: 鼠标移动瞄准, 点击地面移动.<br/>
+            点击地面移动. 默认自动攻击最近敌人.<br/>
+            按 [A] 键切换手动/自动瞄准.<br/>
             Esc 暂停/整理背包.
           </div>
         </div>
@@ -202,6 +246,11 @@ const App = () => {
       {/* --- HUD --- */}
       {(gameState === GameState.PLAYING || gameState === GameState.PRE_LEVEL_UP) && stats && (
         <div className="absolute inset-0 pointer-events-none p-4">
+           {/* Aim Status */}
+           <div className="aim-status">
+               瞄准: {aimStatus} [A]
+           </div>
+
            {/* HP Bar */}
            <div className="bar-container bar-hp">
              <div 
@@ -253,7 +302,7 @@ const App = () => {
             {levelUpOptions.map((card, i) => (
               <div 
                 key={i}
-                onClick={() => selectCard(card)}
+                onClick={() => selectCardForInventory(card)}
                 className={`card rarity-${card.rarity}`}
               >
                 <div className="card-icon">
@@ -261,7 +310,7 @@ const App = () => {
                 </div>
                 <h3 className="card-name mb-2" style={{ color: card.iconColor }}>{card.name}</h3>
                 <p className="card-desc">{card.description}</p>
-                <div className="card-type mt-auto">{card.type}</div>
+                <div className="card-type">{card.type}</div>
               </div>
             ))}
           </div>
@@ -273,12 +322,34 @@ const App = () => {
          <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
            <h2 className="pause-title mb-4">暂停 / 装备调整</h2>
            <p className="pause-desc mb-8">
-             拖动卡片调整顺序。效果卡片(Effect)会影响排列在它后面的技能(Artifact)。<br/>
-             例如: [双重触发] &rarr; [火葫芦] = 双倍火焰。
+             拖动卡片调整顺序。效果卡片(Effect)会影响排列在它后面的卡片。<br/>
+             虚线框表示该卡片受到前方效果的影响。
            </p>
            
-           <div ref={gridElementRef} className="inv-grid gap-2">
-             {renderInventory()}
+           <div className="pause-layout">
+               <div ref={gridElementRef} className="inv-grid">
+                 {renderInventory()}
+               </div>
+
+               {/* Details Panel */}
+               <div className="details-panel">
+                   {selectedCard ? (
+                       <>
+                           <div className="details-title" style={{ color: selectedCard.iconColor }}>
+                               {selectedCard.name}
+                           </div>
+                           <div className="details-type">{selectedCard.rarity} {selectedCard.type}</div>
+                           <div className="details-desc">{selectedCard.description}</div>
+                           {selectedCard.type === CardType.EFFECT && (
+                               <div className="mt-4 text-sm text-cyan-400">
+                                   影响范围: {selectedCard.effectConfig?.influenceCount || 1} 格
+                               </div>
+                           )}
+                       </>
+                   ) : (
+                       <div className="text-gray-500 italic">点击卡片查看详情</div>
+                   )}
+               </div>
            </div>
 
            <button 

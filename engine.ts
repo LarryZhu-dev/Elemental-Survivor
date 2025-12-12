@@ -34,7 +34,6 @@ type Bullet = Container & {
     isDead: boolean;
     // Specific logic
     isTracking?: boolean;
-    target?: Entity;
     pierce: number;
     hitList: Set<number>; // Enemy IDs hit
     // Visuals
@@ -61,6 +60,14 @@ interface DelayedAction {
     action: () => void;
 }
 
+interface ActiveEffect {
+    logic: string;
+    count: number; // How many more cards it influences
+}
+
+// Map Chunking
+const CHUNK_SIZE = 1000;
+
 export class GameEngine {
     app: Application;
     canvas: HTMLCanvasElement;
@@ -76,11 +83,12 @@ export class GameEngine {
     particles: Particle[] = [];
     xpOrbs: XPOrb[] = [];
     obstacles: Graphics[] = []; 
+    generatedChunks: Set<string> = new Set();
 
     // Game Logic
     stats: PlayerStats;
     wave: number = 1;
-    waveTimer: number = 0; // Keeping for general time tracking if needed, but not for spawn
+    waveTimer: number = 0; 
     gameTime: number = 0;
     
     // Wave Logic
@@ -93,18 +101,19 @@ export class GameEngine {
 
     // Input
     mouse: { x: number, y: number } = { x: 0, y: 0 };
+    isAutoAim: boolean = true;
     
     // Performance
-    damageTextPool: Text[] = []; // Simple pool idea, or just throttling
-    damageTextTimer: number = 0;
+    damageTextCooldown: number = 0;
 
-    // Action Queue for "Double Trigger"
+    // Action Queue
     delayedActions: DelayedAction[] = [];
 
     // Callbacks to React
     onUpdateStats: (stats: PlayerStats) => void;
     onGameStateChange: (state: GameState) => void;
     onBossWarning: (name: string) => void;
+    onUpdateAimStatus: (isAuto: boolean) => void;
 
     // Config
     mapType: MapType = MapType.FIXED;
@@ -113,7 +122,8 @@ export class GameEngine {
         canvas: HTMLCanvasElement, 
         onUpdateStats: (s: PlayerStats) => void,
         onGameStateChange: (s: GameState) => void,
-        onBossWarning: (n: string) => void
+        onBossWarning: (n: string) => void,
+        onUpdateAimStatus: (isAuto: boolean) => void
     ) {
         this.canvas = canvas;
         this.app = new Application();
@@ -121,6 +131,7 @@ export class GameEngine {
         this.onUpdateStats = onUpdateStats;
         this.onGameStateChange = onGameStateChange;
         this.onBossWarning = onBossWarning;
+        this.onUpdateAimStatus = onUpdateAimStatus;
 
         // Init Stats
         this.stats = {
@@ -170,6 +181,8 @@ export class GameEngine {
 
         // Start Loop
         this.app.ticker.add(this.update.bind(this));
+        
+        this.onUpdateAimStatus(this.isAutoAim);
     }
 
     addInitialWeapon() {
@@ -234,37 +247,79 @@ export class GameEngine {
         // Init Wave Data
         this.wave = 1;
         this.waveEnemiesSpawned = 0;
-        this.waveTotalEnemies = 15; // Start with manageable amount
+        this.waveTotalEnemies = 15; 
         this.waveDelayTimer = 0;
 
-        this.generateMap();
+        this.updateMapChunks();
         this.onGameStateChange(GameState.PLAYING);
     }
 
-    generateMap() {
-        // Generate random obstacles
-        for (let i = 0; i < 50; i++) {
-            const obs = new Graphics();
-            const type = Math.random();
-            if (type < 0.3) {
-                // Pixel Tree
-                obs.rect(-4, 0, 8, 12).fill(0x5c4033); // Trunk
-                obs.rect(-12, -24, 24, 24).fill(0x228b22); // Leaves
-            } else if (type < 0.6) {
-                // Pixel Rock
-                obs.rect(-10, -5, 20, 10).fill(0x555555);
-                obs.rect(-5, -10, 10, 5).fill(0x777777);
-            } else {
-                // Wall Segment
-                obs.rect(-10, -30, 20, 60).fill(0x8b4513);
+    // Deterministic Map Generation
+    updateMapChunks() {
+        const cx = Math.floor(this.player.x / CHUNK_SIZE);
+        const cy = Math.floor(this.player.y / CHUNK_SIZE);
+
+        for (let x = cx - 1; x <= cx + 1; x++) {
+            for (let y = cy - 1; y <= cy + 1; y++) {
+                const key = `${x},${y}`;
+                if (!this.generatedChunks.has(key)) {
+                    this.generateChunk(x, y);
+                    this.generatedChunks.add(key);
+                }
             }
-            
-            const range = this.mapType === MapType.FIXED ? 1000 : 3000;
-            obs.x = (Math.random() - 0.5) * 2 * range + SCREEN_WIDTH/2;
-            obs.y = (Math.random() - 0.5) * 2 * range + SCREEN_HEIGHT/2;
-            
-            this.obstacles.push(obs);
-            this.world.addChild(obs);
+        }
+    }
+
+    generateChunk(cx: number, cy: number) {
+        // Deterministic seeding based on coords
+        // Simple hash: dot product with primes
+        const seedBase = cx * 73856093 ^ cy * 19349663;
+        
+        const random = () => {
+             const t = Math.sin(seedBase + Math.random()) * 10000; // Use simple math.random for now but seeded would be better. 
+             // To be truly deterministic with Math.sin, we need a custom seed not Math.random.
+             // For this task, "all map has them" is the key. 
+             return Math.random(); 
+        };
+
+        // Custom fast seeded random function for consistency
+        let seed = (cx * 374761393) ^ (cy * 668265263);
+        const seededRandom = () => {
+            seed = (seed ^ 61) ^ (seed >> 16);
+            seed += (seed << 3);
+            seed = seed ^ (seed >> 4);
+            seed *= 668265263;
+            seed = seed ^ (seed >> 15);
+            return (seed >>> 0) / 4294967296;
+        };
+
+        const count = 10; // Obstacles per chunk
+        for(let i=0; i<count; i++) {
+             const obs = new Graphics();
+             const type = seededRandom();
+             const ox = (cx * CHUNK_SIZE) + seededRandom() * CHUNK_SIZE;
+             const oy = (cy * CHUNK_SIZE) + seededRandom() * CHUNK_SIZE;
+
+             if (type < 0.3) {
+                 // Pixel Tree
+                 obs.rect(-4, 0, 8, 12).fill(0x5c4033); // Trunk
+                 obs.rect(-12, -24, 24, 24).fill(0x228b22); // Leaves
+             } else if (type < 0.6) {
+                 // Pixel Rock
+                 obs.rect(-10, -5, 20, 10).fill(0x555555);
+                 obs.rect(-5, -10, 10, 5).fill(0x777777);
+             } else {
+                 // Wall Segment
+                 obs.rect(-10, -30, 20, 60).fill(0x8b4513);
+             }
+             
+             obs.x = ox;
+             obs.y = oy;
+             
+             this.obstacles.push(obs);
+             this.world.addChild(obs);
+             // Keep z-index lower
+             obs.zIndex = 5;
         }
     }
 
@@ -278,6 +333,10 @@ export class GameEngine {
                 this.onGameStateChange(GameState.PLAYING);
             }
         }
+        if (e.code === 'KeyA') {
+            this.isAutoAim = !this.isAutoAim;
+            this.onUpdateAimStatus(this.isAutoAim);
+        }
     }
 
     handleMouseMove = (e: MouseEvent) => {
@@ -289,13 +348,12 @@ export class GameEngine {
         if (this.state !== GameState.PLAYING) return;
         
         // Click to move logic
-        // Transform screen coords to world coords
         const worldX = (e.clientX - SCREEN_WIDTH/2) + this.player.x;
         const worldY = (e.clientY - SCREEN_HEIGHT/2) + this.player.y;
         
         this.player.moveTarget = { x: worldX, y: worldY };
         
-        // Spawn small click indicator
+        // Spawn indicator
         const marker = new Graphics();
         marker.rect(-2, -2, 4, 4).fill(0xffffff);
         marker.x = worldX;
@@ -307,25 +365,21 @@ export class GameEngine {
     update(ticker: Ticker) {
         const delta = ticker.deltaTime;
         
-        // Always update particles for visuals, even in pre-level-up
         this.updateParticles(delta);
 
         if (this.state === GameState.PRE_LEVEL_UP) {
-            // Cutscene Logic
             this.preLevelUpTimer -= delta;
             
-            // Spawn fancy upward particles
             if (Math.random() < 0.3) {
                  this.spawnParticle(
                      this.player.x + (Math.random()-0.5)*30, 
                      this.player.y + 10, 
                      0xffd700, 
                      1, 
-                     true // Upward flow
+                     true 
                  );
             }
 
-            // Camera still follows player slightly
             this.world.pivot.x = this.player.x;
             this.world.pivot.y = this.player.y;
             this.world.position.x = SCREEN_WIDTH / 2;
@@ -341,7 +395,12 @@ export class GameEngine {
         
         this.gameTime += delta;
 
-        // Process delayed actions (for Double Trigger effects)
+        // Map
+        if (Math.floor(this.gameTime) % 60 === 0) {
+            this.updateMapChunks();
+        }
+
+        // Process delayed actions
         for (let i = this.delayedActions.length - 1; i >= 0; i--) {
             this.delayedActions[i].timer -= delta;
             if (this.delayedActions[i].timer <= 0) {
@@ -350,30 +409,22 @@ export class GameEngine {
             }
         }
         
-        // --- 1. Player Movement (Click to Move) ---
         this.updatePlayerMovement(delta);
 
-        // --- 2. Camera Follow ---
         this.world.pivot.x = this.player.x;
         this.world.pivot.y = this.player.y;
         this.world.position.x = SCREEN_WIDTH / 2;
         this.world.position.y = SCREEN_HEIGHT / 2;
 
-        // --- 3. Spawning ---
         this.handleSpawning(delta);
-
-        // --- 4. Weapon Firing ---
         this.handleWeapons(delta);
 
-        // --- 5. Entity Updates ---
         this.updateEnemies(delta);
         this.updateBullets(delta);
         this.updateXP(delta);
 
-        // --- 6. Collision ---
         this.handleCollisions(delta);
 
-        // --- 7. Stats to React ---
         if (Math.floor(this.gameTime) % 15 === 0) {
             this.onUpdateStats({ ...this.stats, hp: this.player.hp, maxHp: this.player.maxHp });
         }
@@ -382,7 +433,7 @@ export class GameEngine {
     updatePlayerMovement(delta: number) {
         if (this.player.invulnTimer > 0) {
             this.player.invulnTimer -= delta;
-            this.player.alpha = 0.5; // Flash effect
+            this.player.alpha = 0.5;
         } else {
             this.player.alpha = 1;
         }
@@ -393,26 +444,23 @@ export class GameEngine {
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             if (dist > 5) {
-                // Move towards target
-                const speed = this.stats.speed * delta; // Normalize by delta
+                // Reduced speed to 80% (4) as requested
+                const speed = 4 * delta; 
                 this.player.x += (dx / dist) * speed;
                 this.player.y += (dy / dist) * speed;
             } else {
-                // Arrived
                 this.player.moveTarget = undefined;
             }
         }
     }
 
     handleSpawning(delta: number) {
-        // If between waves
         if (this.waveDelayTimer > 0) {
             this.waveDelayTimer -= delta;
             if (this.waveDelayTimer <= 0) {
-                // Start next wave
                 this.wave++;
                 this.waveEnemiesSpawned = 0;
-                this.waveTotalEnemies = Math.floor(10 + this.wave * 2.5); // Linear scaling
+                this.waveTotalEnemies = Math.floor(10 + this.wave * 2.5);
                 
                 if (this.wave % 10 === 0) {
                     this.onBossWarning(`Level ${this.wave} BOSS`);
@@ -425,18 +473,13 @@ export class GameEngine {
             return;
         }
 
-        // Check for wave clear
         if (this.waveEnemiesSpawned >= this.waveTotalEnemies && this.enemies.length === 0) {
-            // Wave Cleared!
-            this.waveDelayTimer = 120; // 2 seconds delay
+            this.waveDelayTimer = 120;
             return;
         }
 
-        // Spawning logic
         if (this.waveEnemiesSpawned < this.waveTotalEnemies) {
-             // Cap concurrent enemies slightly to prevent lag, but allow most
              if (this.enemies.length < 50) {
-                 // Spawn rate: Increases slightly with wave
                  const chance = 0.02 + (this.wave * 0.002);
                  if (Math.random() < chance) {
                      this.spawnEnemy(false);
@@ -455,36 +498,30 @@ export class GameEngine {
         const cont = new Container() as Entity;
         const g = new Graphics();
         
-        // --- Pixel Art: Monsters ---
         if (isBoss) {
-            // Boss: Big Ogre
-            const color = 0xef4444; // Red
-            g.rect(-20, -25, 40, 50).fill(color); // Body
-            g.rect(-15, -15, 10, 10).fill(0xffff00); // Eye L
-            g.rect(5, -15, 10, 10).fill(0xffff00); // Eye R
-            g.rect(-10, 10, 20, 5).fill(0x000000); // Mouth
-            g.rect(-25, -5, 5, 20).fill(0x7f1d1d); // Arm L
-            g.rect(20, -5, 5, 20).fill(0x7f1d1d); // Arm R
+            const color = 0xef4444; 
+            g.rect(-20, -25, 40, 50).fill(color); 
+            g.rect(-15, -15, 10, 10).fill(0xffff00); 
+            g.rect(5, -15, 10, 10).fill(0xffff00); 
+            g.rect(-10, 10, 20, 5).fill(0x000000); 
+            g.rect(-25, -5, 5, 20).fill(0x7f1d1d); 
+            g.rect(20, -5, 5, 20).fill(0x7f1d1d); 
         } else {
-            // Minions
             const type = Math.floor(Math.random() * 3);
             if (type === 0) {
-                // Goblin (Green)
                 g.rect(-6, -6, 12, 12).fill(0x10b981);
-                g.rect(-4, -4, 2, 2).fill(0x000000); // Eye
-                g.rect(2, -4, 2, 2).fill(0x000000); // Eye
-                g.rect(-8, -2, 2, 4).fill(0x059669); // Ear
-                g.rect(6, -2, 2, 4).fill(0x059669); // Ear
+                g.rect(-4, -4, 2, 2).fill(0x000000); 
+                g.rect(2, -4, 2, 2).fill(0x000000); 
+                g.rect(-8, -2, 2, 4).fill(0x059669); 
+                g.rect(6, -2, 2, 4).fill(0x059669); 
             } else if (type === 1) {
-                // Slime (Cyan)
                 g.rect(-6, -4, 12, 8).fill(0x06b6d4);
-                g.rect(-5, -6, 10, 2).fill(0x06b6d4); // Top round
-                g.rect(-2, -2, 2, 2).fill(0xffffff); // Glint
+                g.rect(-5, -6, 10, 2).fill(0x06b6d4); 
+                g.rect(-2, -2, 2, 2).fill(0xffffff); 
             } else {
-                // Bat (Purple)
                 g.rect(-4, -4, 8, 8).fill(0x8b5cf6);
-                g.rect(-8, -6, 4, 4).fill(0x6d28d9); // Wing
-                g.rect(4, -6, 4, 4).fill(0x6d28d9); // Wing
+                g.rect(-8, -6, 4, 4).fill(0x6d28d9); 
+                g.rect(4, -6, 4, 4).fill(0x6d28d9); 
             }
         }
 
@@ -492,12 +529,8 @@ export class GameEngine {
         cont.x = x;
         cont.y = y;
         
-        // Balance: Lower scaling so it doesn't become impossible
-        // Old: Math.pow(this.wave, 1.1)
-        // New: 5 + wave * 1.5. Linear.
         const waveHP = 5 + (this.wave * 1.5);
         cont.maxHp = isBoss ? 300 + (this.wave * 10) : waveHP;
-        
         cont.hp = cont.maxHp;
         cont.radius = isBoss ? 25 : 10;
         cont.isDead = false;
@@ -515,87 +548,132 @@ export class GameEngine {
         this.world.addChild(cont);
     }
 
+    // --- RECURSIVE LOGIC SYSTEM ---
+    weaponCooldowns: { [key: string]: number } = {};
+
     handleWeapons(delta: number) {
-        let modifiers: { logic: string, count: number }[] = [];
-        let buffStats = {
-            rangeMult: 1,
-            speedMult: 1,
-            freqMult: 1
-        };
+        // Active effects stack
+        let activeEffects: ActiveEffect[] = [];
+        let buffStats = { rangeMult: 1, speedMult: 1, freqMult: 1 };
+        
+        // We iterate through the inventory.
+        // Effect cards produce effects that are added to 'activeEffects'.
+        // Artifact cards consume 'activeEffects' to modify their behavior.
+        // Effect cards ALSO consume 'activeEffects' to modify how many times they are applied (stacking).
 
         for (const card of this.stats.inventory) {
+            // Cooldown Reduction Buffs
+            if (card.type === CardType.BUFF && card.buffConfig) {
+                 if (card.buffConfig.range) buffStats.rangeMult += card.buffConfig.range;
+                 if (card.buffConfig.speed) buffStats.speedMult += card.buffConfig.speed;
+                 if (card.buffConfig.frequency) buffStats.freqMult += card.buffConfig.frequency;
+                 continue;
+            }
+
+            // Determine Repetition Count based on active 'double' effects
+            // Logic: Base 1. Each 'double' effect multiplies execution by 2.
+            let executionCount = 1;
+            activeEffects.forEach(eff => {
+                if (eff.logic === 'double') executionCount *= 2;
+            });
+
             if (card.type === CardType.EFFECT && card.effectConfig) {
-                modifiers.push({ 
-                    logic: card.effectConfig.logic, 
-                    count: card.effectConfig.influenceCount 
-                });
-            } else if (card.type === CardType.BUFF && card.buffConfig) {
-                if (card.buffConfig.range) buffStats.rangeMult += card.buffConfig.range;
-                if (card.buffConfig.speed) buffStats.speedMult += card.buffConfig.speed;
-                if (card.buffConfig.frequency) buffStats.freqMult += card.buffConfig.frequency;
-            } else if (card.type === CardType.ARTIFACT && card.artifactConfig) {
-                if (!this.weaponCooldowns[card.id]) this.weaponCooldowns[card.id] = 0;
+                // An Effect card "Executes" by adding its effect to the active stack.
+                // If executionCount > 1, it adds its effect multiple times.
                 
+                for(let i=0; i<executionCount; i++) {
+                     activeEffects.push({
+                         logic: card.effectConfig.logic,
+                         count: card.effectConfig.influenceCount
+                     });
+                }
+            } 
+            else if (card.type === CardType.ARTIFACT && card.artifactConfig) {
+                // Handle Cooldown
+                if (!this.weaponCooldowns[card.id]) this.weaponCooldowns[card.id] = 0;
                 this.weaponCooldowns[card.id] -= delta * buffStats.freqMult;
 
                 if (this.weaponCooldowns[card.id] <= 0) {
-                    this.triggerArtifact(card, modifiers, buffStats);
+                    // Execute Weapon logic N times
+                    // Note: If executionCount is high (e.g. 4), we trigger the artifact 4 times instantly.
+                    // For performance and visual clarity, we might stagger them slightly or just fire all.
+                    // The original implementation used delayedActions for 'double'. 
+                    // Let's use a loop with small delay offsets for clarity.
+                    
+                    for(let i=0; i<executionCount; i++) {
+                         if (i === 0) {
+                             this.fireArtifact(card, activeEffects, buffStats);
+                         } else {
+                             // Stagger subsequent triggers by 5 frames * i
+                             this.delayedActions.push({
+                                 timer: i * 5,
+                                 action: () => this.fireArtifact(card, activeEffects, buffStats)
+                             });
+                         }
+                    }
+
                     this.weaponCooldowns[card.id] = card.artifactConfig.cooldown;
                 }
-
-                modifiers = modifiers.map(m => ({ ...m, count: m.count - 1 })).filter(m => m.count > 0);
-                buffStats = { rangeMult: 1, speedMult: 1, freqMult: 1 };
             }
+
+            // Decrement Effect Counts (Age the effects)
+            // But effects apply to the *next* card. So we decrement after processing current card.
+            activeEffects.forEach(eff => eff.count--);
+            activeEffects = activeEffects.filter(eff => eff.count > 0);
         }
     }
 
-    triggerArtifact(card: CardDef, modifiers: { logic: string }[], buffs: any) {
-        let double = false;
-        modifiers.forEach(m => {
-            if (m.logic === 'double') double = true;
-        });
-
-        // Fire first shot immediately
-        this.executeCardLogic(card, modifiers, buffs);
-
-        // If double effect, schedule a second shot with delay
-        if (double) {
-            this.delayedActions.push({
-                timer: 15, // 15 frames delay (~0.25s at 60fps)
-                action: () => {
-                    this.executeCardLogic(card, modifiers, buffs);
-                }
-            });
-        }
-    }
-
-    executeCardLogic(card: CardDef, modifiers: { logic: string }[], buffs: any) {
+    fireArtifact(card: CardDef, activeEffects: ActiveEffect[], buffs: any) {
         if (!card.artifactConfig) return;
         const conf = card.artifactConfig;
 
-        // Fix: Orbiting Sword Check (Prevent Duplicates)
         if (conf.projectileType === 'orbit') {
             const alreadyActive = this.bullets.some(b => b.ownerId === card.id && !b.isDead);
-            if (alreadyActive) return; // Do not spawn another if one is orbiting
+            if (alreadyActive) return; 
         }
-        
+
+        // Aggregate Logic Modifiers
         let isFan = false;
         let isRing = false;
         let isBack = false;
         let track = false;
-
-        modifiers.forEach(m => {
+        
+        // Use set to avoid redundant booleans but multiple 'split_back' could mean quad? 
+        // For simplicity, boolean flags.
+        activeEffects.forEach(m => {
             if (m.logic === 'split_back') isBack = true;
             if (m.logic === 'fan') isFan = true;
             if (m.logic === 'ring') isRing = true;
             if (m.logic === 'track') track = true;
         });
 
-        // Aim at mouse (screen to relative)
-        const dx = this.mouse.x - (SCREEN_WIDTH / 2);
-        const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
-        let baseAngle = Math.atan2(dy, dx);
+        // Aiming Logic
+        let baseAngle = 0;
+        let targetEnemy = null;
         
+        if (this.isAutoAim) {
+            // Find nearest
+            let minD = 99999;
+            this.enemies.forEach(e => {
+                const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
+                if (d < minD) { minD = d; targetEnemy = e; }
+            });
+            
+            if (targetEnemy) {
+                baseAngle = Math.atan2(targetEnemy.y - this.player.y, targetEnemy.x - this.player.x);
+            } else {
+                // No enemy, aim forward (mouse)
+                const dx = this.mouse.x - (SCREEN_WIDTH / 2);
+                const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
+                baseAngle = Math.atan2(dy, dx);
+            }
+        } else {
+            // Manual Aim
+            const dx = this.mouse.x - (SCREEN_WIDTH / 2);
+            const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
+            baseAngle = Math.atan2(dy, dx);
+        }
+
         let projectileCount = 1;
         if (isFan) projectileCount = 5;
         if (isRing) projectileCount = 12;
@@ -611,9 +689,11 @@ export class GameEngine {
         }
 
         if (isBack) {
-            angles.push(baseAngle + Math.PI);
+            angles.forEach(a => angles.push(a + Math.PI)); // Add reverse shot for every shot
         }
 
+        // Filter angles? No, let them stack.
+        
         angles.forEach(angle => {
             this.createBullet(conf, angle, buffs, track, card.id);
         });
@@ -623,28 +703,28 @@ export class GameEngine {
         const b = new Container() as Bullet;
         const g = new Graphics();
         
-        // --- Visuals ---
-        
         let speed = 5 * buffs.speedMult;
         let life = 180 * buffs.rangeMult; 
-        
+        let radius = 12;
+
         if (conf.projectileType === 'projectile') {
-            g.circle(0,0, 4).fill(0xffffff); // Core
-            g.circle(0,0, 8).fill({ color: conf.color, alpha: 0.6 }); // Glow
+            g.circle(0,0, 4).fill(0xffffff); 
+            g.circle(0,0, 8).fill({ color: conf.color, alpha: 0.6 }); 
             g.blendMode = 'add';
         } else if (conf.projectileType === 'beam') {
             g.rect(0, -5, 40, 10).fill(conf.color);
             g.blendMode = 'add';
             speed = 10 * buffs.speedMult;
         } else if (conf.projectileType === 'area') {
-            // Wind/Area visual improvement
+            const r = 100 * buffs.rangeMult;
+            radius = r; // Sync Hitbox with Visuals
+            
             if (conf.element === ElementType.WIND) {
-                const r = 100 * buffs.rangeMult;
                 g.arc(0,0, r, -0.5, 0.5).stroke({width: 2, color: 0xccffcc, alpha: 0.5});
                 g.arc(0,0, r*0.7, -0.2, 0.8).stroke({width: 2, color: 0xffffff, alpha: 0.3});
             } else {
                 g.moveTo(0,0);
-                g.arc(0,0, 100 * buffs.rangeMult, -0.5, 0.5); 
+                g.arc(0,0, r, -0.5, 0.5); 
                 g.lineTo(0,0);
                 g.fill({ color: conf.color, alpha: 0.5 });
             }
@@ -663,11 +743,8 @@ export class GameEngine {
         }
         
         b.addChild(g);
-        
-        // Position
         b.x = this.player.x;
         b.y = this.player.y;
-
         b.vx = Math.cos(angle) * speed;
         b.vy = Math.sin(angle) * speed;
         b.rotation = angle;
@@ -675,14 +752,12 @@ export class GameEngine {
         b.damage = conf.baseDamage * this.stats.damageMultiplier;
         b.element = conf.element;
         b.duration = life;
-        b.radius = 12;
+        b.radius = radius;
         b.ownerId = ownerId;
         b.isDead = false;
         b.isTracking = tracking;
         b.hitList = new Set();
         b.pierce = (conf.projectileType === 'area' || conf.projectileType === 'orbit') ? 999 : 1;
-        
-        // Particle Trail Config
         b.color = conf.color;
         b.trailTimer = 0;
 
@@ -690,16 +765,12 @@ export class GameEngine {
         this.world.addChild(b);
     }
 
-    // --- ENEMY LOGIC & WEAPON COOLDOWNS ---
-    weaponCooldowns: { [key: string]: number } = {};
-
     updateEnemies(delta: number) {
         const playerPos = { x: this.player.x, y: this.player.y };
         
         this.enemies.forEach(e => {
             if (e.isDead) return;
 
-            // Hit Flash Logic
             if (e.hitFlashTimer > 0) {
                 e.hitFlashTimer -= delta;
                 e.tint = 0xff0000;
@@ -712,7 +783,6 @@ export class GameEngine {
             const dist = Math.sqrt(dx * dx + dy * dy);
             
             if (dist > 10) {
-                // Base speed + slight wave scaling
                 const moveSpeed = (1 + (this.wave * 0.005)) * delta;
                 e.x += (dx / dist) * moveSpeed;
                 e.y += (dy / dist) * moveSpeed;
@@ -720,7 +790,6 @@ export class GameEngine {
 
             if (e.isBurning) {
                 e.hp -= 0.1 * delta;
-                // Reduce burn particle freq
                 if (Math.random() < 0.1) this.spawnParticle(e.x, e.y, 0xff4500);
             }
 
@@ -741,8 +810,6 @@ export class GameEngine {
                 return;
             }
 
-            // Particle Trails (Replaces old line trail)
-            // Spawn a particle every 3 frames if it's a moving projectile
             if (b.vx !== 0 || b.vy !== 0) {
                 b.trailTimer -= delta;
                 if (b.trailTimer <= 0) {
@@ -751,25 +818,21 @@ export class GameEngine {
                 }
             }
 
-            if (b.ownerId.includes('art_sword_orbit')) { // Loose check for id as ownerId might be generated
-                // Orbit Logic
+            if (b.ownerId.includes('art_sword_orbit')) { 
                 b.rotation += 0.1 * delta;
                 b.x = this.player.x + Math.cos(b.rotation) * 100;
                 b.y = this.player.y + Math.sin(b.rotation) * 100;
             } else if (b.isTracking) {
                 let nearest = null;
                 let minDst = 1000;
-                // Optimized search
                 for (const e of this.enemies) {
                     const d = Math.hypot(e.x - b.x, e.y - b.y);
                     if (d < minDst) { minDst = d; nearest = e; }
                 }
                 if (nearest) {
                     const angle = Math.atan2(nearest.y - b.y, nearest.x - b.x);
-                    // Slight turn speed
                     b.vx = b.vx * 0.9 + Math.cos(angle) * 1;
                     b.vy = b.vy * 0.9 + Math.sin(angle) * 1;
-                    // Normalize to max speed? Or just let it drift.
                 }
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
@@ -788,7 +851,7 @@ export class GameEngine {
                 p.y += p.vy * delta;
             }
             p.alpha -= 0.03 * delta;
-            p.scale.x *= 0.95; // Shrink
+            p.scale.x *= 0.95; 
             p.scale.y *= 0.95;
             p.life -= delta;
             
@@ -822,28 +885,25 @@ export class GameEngine {
     }
 
     handleCollisions(delta: number) {
-        // Player vs Enemy Collision (Contact Damage)
         if (this.player.invulnTimer <= 0) {
             for (const e of this.enemies) {
                  const dx = this.player.x - e.x;
                  const dy = this.player.y - e.y;
                  const dist = Math.sqrt(dx * dx + dy * dy);
                  if (dist < (this.player.radius + e.radius)) {
-                     // Hit
-                     this.player.hp -= 5 + (this.wave * 0.5); // Damage scales slowly
-                     this.player.invulnTimer = 30; // 0.5s i-frame
+                     this.player.hp -= 5 + (this.wave * 0.5); 
+                     this.player.invulnTimer = 30; 
                      this.spawnText("-HP", this.player.x, this.player.y - 30, 0xff0000);
                      if (this.player.hp <= 0) {
                          this.player.hp = 0;
                          this.state = GameState.GAME_OVER;
                          this.onGameStateChange(GameState.GAME_OVER);
                      }
-                     break; // One hit per frame max
+                     break; 
                  }
             }
         }
 
-        // Bullet vs Enemy
         for (const b of this.bullets) {
             if (b.isDead) continue;
             for (const e of this.enemies) {
@@ -874,17 +934,13 @@ export class GameEngine {
         return obj._tempId;
     }
 
-    damageTextCooldown = 0;
-
     applyDamage(e: Entity, b: Bullet) {
         let dmg = b.damage;
 
-        e.hitFlashTimer = 5; // Flash for 5 frames
+        e.hitFlashTimer = 5; 
 
-        // --- Wind Knockback ---
         if (b.element === ElementType.WIND) {
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
-            // Strong push
             e.x += Math.cos(angle) * 30; 
             e.y += Math.sin(angle) * 30;
         }
@@ -900,7 +956,7 @@ export class GameEngine {
         if (b.element === ElementType.WATER) {
             e.isWet = true;
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
-            e.x += Math.cos(angle) * 20; // Water mild push
+            e.x += Math.cos(angle) * 20; 
             e.y += Math.sin(angle) * 20;
             
             if (e.isBurning) {
@@ -923,15 +979,12 @@ export class GameEngine {
         }
 
         e.hp -= dmg;
-
-        // Visual impact particles
         this.spawnParticle(e.x, e.y, b.color, 3);
 
-        // Optimization: Don't spawn text on every single hit if laggy
         this.damageTextCooldown--;
-        if (this.damageTextCooldown <= 0 || dmg > 10) { // Always show high dmg
+        if (this.damageTextCooldown <= 0 || dmg > 10) { 
             this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffffff);
-            this.damageTextCooldown = 2; // Throttle
+            this.damageTextCooldown = 2; 
         }
     }
 
@@ -963,10 +1016,9 @@ export class GameEngine {
         const val = 1 + (this.wave * 0.5);
         
         if (this.wave > 10) { color = 0x00ff00; size = 8; }
-        if (this.wave > 30) { color = 0x00ffff; size = 10; } // Cyan
-        if (this.wave > 80) { color = 0xffd700; size = 12; } // Gold
+        if (this.wave > 30) { color = 0x00ffff; size = 10; } 
+        if (this.wave > 80) { color = 0xffd700; size = 12; } 
 
-        // Diamond Shape for better visibility
         orb.poly([
             0, -size,
             size, 0,
@@ -989,10 +1041,8 @@ export class GameEngine {
 
     startLevelUpSequence() {
         this.state = GameState.PRE_LEVEL_UP;
-        this.preLevelUpTimer = 90; // 1.5 seconds at 60fps
+        this.preLevelUpTimer = 90; 
         this.onGameStateChange(GameState.PRE_LEVEL_UP);
-        
-        // Spawn Big Text
         this.spawnText("LEVEL UP!", this.player.x, this.player.y - 50, 0xffd700);
     }
 
@@ -1005,7 +1055,6 @@ export class GameEngine {
     }
 
     spawnText(text: string, x: number, y: number, color: number) {
-        // Optimization check
         if (this.app.ticker.FPS < 40 && Math.random() > 0.5) return;
 
         const t = new Text({
@@ -1035,7 +1084,7 @@ export class GameEngine {
     }
 
     spawnParticle(x: number, y: number, color: number, count = 3, upward = false) {
-        if (this.app.ticker.FPS < 30) return; // Skip particles on low FPS
+        if (this.app.ticker.FPS < 30) return; 
 
         for(let i=0; i<count; i++) {
             const p = new Graphics() as Particle;
@@ -1044,7 +1093,7 @@ export class GameEngine {
             p.y = y;
             if (upward) {
                 p.vx = (Math.random()-0.5) * 2;
-                p.vy = -Math.random() * 3 - 1; // Always up
+                p.vy = -Math.random() * 3 - 1; 
             } else {
                 p.vx = (Math.random()-0.5) * 4;
                 p.vy = (Math.random()-0.5) * 4;
@@ -1052,7 +1101,7 @@ export class GameEngine {
             p.life = 30;
             p.maxLife = 30;
             p.isStatic = false;
-            p.blendMode = 'add'; // GLOW
+            p.blendMode = 'add'; 
             
             this.particles.push(p);
             this.world.addChild(p);

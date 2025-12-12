@@ -84,11 +84,11 @@ export const ARTIFACT_CARDS: CardDef[] = [
 
 // 3. Effects (The Logic Changers)
 export const EFFECT_CARDS: CardDef[] = [
-  { id: 'eff_double_s', name: '双重触发', description: '下一法器释放两次', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'double', influenceCount: 1 } },
-  { id: 'eff_double_g', name: '多重触发', description: '下两个法器释放两次', type: CardType.EFFECT, rarity: Rarity.GOLD, iconColor: COLORS.RARITY_GOLD, effectConfig: { logic: 'double', influenceCount: 2 } },
+  { id: 'eff_double_s', name: '双重触发', description: '下一张卡片逻辑触发两次', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'double', influenceCount: 1 } },
+  { id: 'eff_double_g', name: '多重触发', description: '下两张卡片逻辑触发两次', type: CardType.EFFECT, rarity: Rarity.GOLD, iconColor: COLORS.RARITY_GOLD, effectConfig: { logic: 'double', influenceCount: 2 } },
   { id: 'eff_split_s', name: '回马枪', description: '增加向后发射', type: CardType.EFFECT, rarity: Rarity.SILVER, iconColor: COLORS.RARITY_SILVER, effectConfig: { logic: 'split_back', influenceCount: 1 } },
-  { id: 'eff_fan_p', name: '万箭齐发', description: '变为扇形发射', type: CardType.EFFECT, rarity: Rarity.PRISMATIC, iconColor: COLORS.RARITY_PRISMATIC, effectConfig: { logic: 'fan', influenceCount: 3 } },
-  { id: 'eff_track_g', name: '御物术', description: '赋予追踪能力', type: CardType.EFFECT, rarity: Rarity.GOLD, iconColor: COLORS.RARITY_GOLD, effectConfig: { logic: 'track', influenceCount: 2 } },
+  { id: 'eff_fan_p', name: '万箭齐发', description: '变为扇形发射 (范围3)', type: CardType.EFFECT, rarity: Rarity.PRISMATIC, iconColor: COLORS.RARITY_PRISMATIC, effectConfig: { logic: 'fan', influenceCount: 3 } },
+  { id: 'eff_track_g', name: '御物术', description: '赋予追踪能力 (范围2)', type: CardType.EFFECT, rarity: Rarity.GOLD, iconColor: COLORS.RARITY_GOLD, effectConfig: { logic: 'track', influenceCount: 2 } },
 ];
 
 // 4. Buffs (Stat modifiers for next artifact)
@@ -117,28 +117,27 @@ export const getRandomCard = (wave: number, currentInventory: CardDef[] = [], ex
         
         // Prevent Duplicate Artifacts in Inventory
         if (c.type === CardType.ARTIFACT) {
-            const alreadyHas = currentInventory.some(invItem => invItem.id === c.id);
+            // Check by NAME not ID, because ID in inventory is randomized
+            const alreadyHas = currentInventory.some(invItem => invItem.name === c.name);
             if (alreadyHas) return false;
         }
 
         // Prevent Duplicates in current selection options (Exclude List)
-        // Check by base ID (before generateId adds random suffix)
-        const isExcluded = excludeList.some(ex => ex.name === c.name); // Using name is safer for "template" comparison here
+        const isExcluded = excludeList.some(ex => ex.name === c.name);
         if (isExcluded) return false;
 
         return true;
     });
 
-    // Fallback if pool is empty (e.g. collected all gold artifacts), downgrade rarity or pick stat
+    // Fallback
     let finalPool = pool;
     if (finalPool.length === 0) {
         finalPool = STAT_CARDS.filter(c => !excludeList.some(ex => ex.name === c.name)); 
-        // If still empty (extremely rare), just allow duplicates
         if (finalPool.length === 0) finalPool = STAT_CARDS;
     }
 
     const template = finalPool[Math.floor(Math.random() * finalPool.length)];
     
-    // Return a copy with unique ID (stats can be dupe, artifacts are filtered above)
+    // Return a copy with unique ID
     return { ...template, id: generateId() };
 }
