@@ -191,49 +191,44 @@
         flex-direction: column;
         cursor: pointer;
         transition: transform 0.1s, box-shadow 0.2s;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.8);
         position: relative;
         box-sizing: border-box;
+        border-style: solid;
+        border-width: 6px;
       }
       
       .card:hover { 
         transform: scale(1.05) translateY(-5px); 
       }
 
-      /* Card Rarity Styles */
-      /* Base border setup */
-      .card {
-        border-style: solid;
-        border-width: 6px;
-      }
-
+      /* Card Rarity Styles - Always Glowing */
       /* Silver */
       .rarity-silver {
         border-color: #cbd5e1; /* slate-300 */
-        box-shadow: 0 0 10px rgba(203, 213, 225, 0.2);
+        box-shadow: 0 0 15px rgba(203, 213, 225, 0.4);
       }
       .card.rarity-silver:hover {
-        box-shadow: 0 0 25px rgba(203, 213, 225, 0.8);
+        box-shadow: 0 0 30px rgba(203, 213, 225, 0.9);
       }
       
       /* Gold */
       .rarity-gold {
         border-color: #fbbf24; /* amber-400 */
-        box-shadow: 0 0 15px rgba(251, 191, 36, 0.3);
+        box-shadow: 0 0 20px rgba(251, 191, 36, 0.5);
       }
       .card.rarity-gold:hover {
-        box-shadow: 0 0 35px rgba(251, 191, 36, 0.9);
+        box-shadow: 0 0 40px rgba(251, 191, 36, 1);
       }
 
       /* Prismatic */
       @keyframes rainbow-border {
-        0% { border-color: #ff0000; box-shadow: 0 0 30px rgba(255,0,0,0.5); }
-        17% { border-color: #ffff00; box-shadow: 0 0 30px rgba(255,255,0,0.5); }
-        33% { border-color: #00ff00; box-shadow: 0 0 30px rgba(0,255,0,0.5); }
-        50% { border-color: #00ffff; box-shadow: 0 0 30px rgba(0,255,255,0.5); }
-        67% { border-color: #0000ff; box-shadow: 0 0 30px rgba(0,0,255,0.5); }
-        83% { border-color: #ff00ff; box-shadow: 0 0 30px rgba(255,0,255,0.5); }
-        100% { border-color: #ff0000; box-shadow: 0 0 30px rgba(255,0,0,0.5); }
+        0% { border-color: #ff0000; box-shadow: 0 0 20px rgba(255,0,0,0.5); }
+        17% { border-color: #ffff00; box-shadow: 0 0 20px rgba(255,255,0,0.5); }
+        33% { border-color: #00ff00; box-shadow: 0 0 20px rgba(0,255,0,0.5); }
+        50% { border-color: #00ffff; box-shadow: 0 0 20px rgba(0,255,255,0.5); }
+        67% { border-color: #0000ff; box-shadow: 0 0 20px rgba(0,0,255,0.5); }
+        83% { border-color: #ff00ff; box-shadow: 0 0 20px rgba(255,0,255,0.5); }
+        100% { border-color: #ff0000; box-shadow: 0 0 20px rgba(255,0,0,0.5); }
       }
       .rarity-prismatic {
         border-color: #ff00ff;
@@ -317,41 +312,58 @@
         /* Default border */
         border: 2px solid #555;
         transition: box-shadow 0.2s, border-color 0.2s;
+        box-shadow: 0 0 5px rgba(0,0,0,0.5);
       }
       
-      .inv-slot.rarity-silver { border-color: #cbd5e1; }
-      .inv-slot.rarity-gold { border-color: #fbbf24; }
+      /* Always show slight glow in inventory too */
+      .inv-slot.rarity-silver { border-color: #cbd5e1; box-shadow: 0 0 8px rgba(203, 213, 225, 0.3); }
+      .inv-slot.rarity-gold { border-color: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.3); }
       .inv-slot.rarity-prismatic { border-color: #d946ef; animation: rainbow-border 3s linear infinite; }
 
       .inv-slot:active { cursor: grabbing; }
       .inv-slot.muuri-item-dragging {
         z-index: 10;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.8);
+        box-shadow: 0 15px 30px rgba(0,0,0,0.9);
+        transform: scale(1.1);
       }
-      .inv-slot.muuri-item-releasing { z-index: 9; }
-      .inv-slot.muuri-item-hidden { z-index: 0; }
       
       /* Effect Range Highlight */
-      /* The source card */
+      /* The source card (Effect Card) */
       .inv-slot.is-effect-source {
-         box-shadow: 0 0 10px #a5f3fc;
+         border-color: #a855f7 !important; /* purple-500 */
+         box-shadow: 0 0 15px #a855f7 !important;
          z-index: 2;
+      }
+      /* Link/Arrow hint for Source */
+      .inv-slot.is-effect-source::after {
+        content: '➜';
+        position: absolute;
+        right: -8px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #a855f7;
+        font-size: 14px;
+        text-shadow: 0 0 5px black;
+        z-index: 20;
       }
 
       /* The affected card */
       .inv-slot.is-affected {
-        position: absolute;
+        /* Dashed Cyan border to indicate being modified */
+        border: 2px dashed #22d3ee !important; /* cyan-400 */
+        background-color: rgba(34, 211, 238, 0.1);
       }
-      /* Create a "bracket" or wrapped look */
-      .inv-slot.is-affected::after {
+      /* Bracket look */
+      .inv-slot.is-affected::before {
         content: '';
         position: absolute;
-        inset: -6px;
-        border: 2px solid #a5f3fc; /* cyan-200 */
-        border-radius: 4px;
+        top: -4px; bottom: -4px; left: -4px; right: -4px;
+        border: 2px solid #22d3ee;
+        border-radius: 6px;
+        opacity: 0.6;
         pointer-events: none;
-        z-index: 20;
-        box-shadow: inset 0 0 10px rgba(165, 243, 252, 0.3);
+        box-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
+        z-index: 5;
       }
 
       .badge {
@@ -361,8 +373,8 @@
         font-size: 8px;
         padding: 0 0.25rem;
       }
-      .badge-effect { background-color: white; color: black; }
-      .badge-buff { background-color: #a5f3fc; /* cyan-200 */ color: black; }
+      .badge-effect { background-color: #d946ef; color: white; font-weight: bold; }
+      .badge-buff { background-color: #22d3ee; /* cyan-200 */ color: black; font-weight: bold; }
 
       /* Details Panel */
       .details-panel {

@@ -6,6 +6,8 @@ import { SCREEN_HEIGHT, SCREEN_WIDTH } from './constants';
 type Entity = Container & {
     vx: number;
     vy: number;
+    knockbackVx: number;
+    knockbackVy: number;
     hp: number;
     maxHp: number;
     isDead: boolean;
@@ -234,6 +236,8 @@ export class GameEngine {
         cont.y = SCREEN_HEIGHT / 2;
         cont.vx = 0;
         cont.vy = 0;
+        cont.knockbackVx = 0;
+        cont.knockbackVy = 0;
         cont.hp = 100;
         cont.maxHp = 100;
         cont.radius = 12; // Hitbox radius
@@ -530,6 +534,8 @@ export class GameEngine {
         cont.isDead = false;
         cont.vx = 0; 
         cont.vy = 0;
+        cont.knockbackVx = 0;
+        cont.knockbackVy = 0;
         
         cont.isBurning = false;
         cont.isWet = false;
@@ -551,9 +557,13 @@ export class GameEngine {
         let buffStats = { rangeMult: 1, speedMult: 1, freqMult: 1 };
         
         // We iterate through the inventory.
-        // Effect cards produce effects that are added to 'activeEffects'.
-        // Artifact cards consume 'activeEffects' to modify their behavior.
-        // Effect cards ALSO consume 'activeEffects' to modify how many times they are applied (stacking).
+        // Logic:
+        // 1. Calculate execution params based on CURRENT activeEffects.
+        // 2. If card is EFFECT, add to list of active effects for NEXT cards.
+        // 3. If card is ARTIFACT, execute it using params.
+        // 4. Aging: Decrement counts of activeEffects. 
+        //    CRITICAL: Effects added THIS iteration should NOT decrement this iteration,
+        //    otherwise an influenceCount of 1 expires before reaching the next card.
 
         for (const card of this.stats.inventory) {
             // Cooldown Reduction Buffs
@@ -571,12 +581,14 @@ export class GameEngine {
                 if (eff.logic === 'double') executionCount *= 2;
             });
 
+            const newEffects: ActiveEffect[] = [];
+
             if (card.type === CardType.EFFECT && card.effectConfig) {
                 // An Effect card "Executes" by adding its effect to the active stack.
                 // If executionCount > 1, it adds its effect multiple times.
                 
                 for(let i=0; i<executionCount; i++) {
-                     activeEffects.push({
+                     newEffects.push({
                          logic: card.effectConfig.logic,
                          count: card.effectConfig.influenceCount
                      });
@@ -587,9 +599,7 @@ export class GameEngine {
                 if (!this.weaponCooldowns[card.id]) this.weaponCooldowns[card.id] = 0;
                 this.weaponCooldowns[card.id] -= delta * buffStats.freqMult;
 
-                // Special handling for persistent weapons (Sword, Glaive)
-                // They trigger once to spawn, then the cooldown might be used for special moves or respawning.
-                // For this game, we just check existence every frame for them.
+                // Persistent weapons logic check
                 if (card.artifactConfig.projectileType === 'orbit' || (card.id.includes('art_track') && card.artifactConfig.projectileType !== 'beam')) {
                     this.fireArtifact(card, activeEffects, buffStats);
                 } 
@@ -599,10 +609,12 @@ export class GameEngine {
                          if (i === 0) {
                              this.fireArtifact(card, activeEffects, buffStats);
                          } else {
-                             // Stagger subsequent triggers by 5 frames * i
+                             // Stagger subsequent triggers more visibly
+                             // Use a closure to capture the current state of effects
+                             const capturedEffects = [...activeEffects.map(e => ({...e}))]; 
                              this.delayedActions.push({
-                                 timer: i * 5,
-                                 action: () => this.fireArtifact(card, activeEffects, buffStats)
+                                 timer: i * 8, // 8 frames delay per double
+                                 action: () => this.fireArtifact(card, capturedEffects, buffStats)
                              });
                          }
                     }
@@ -612,9 +624,13 @@ export class GameEngine {
             }
 
             // Decrement Effect Counts (Age the effects)
-            // But effects apply to the *next* card. So we decrement after processing current card.
+            // Only decrement effects that were already present (passed over this card)
+            // New effects added by this card apply to the NEXT card, so they shouldn't decrement yet.
             activeEffects.forEach(eff => eff.count--);
             activeEffects = activeEffects.filter(eff => eff.count > 0);
+            
+            // Add new effects for the next iteration
+            activeEffects.push(...newEffects);
         }
     }
 
@@ -626,12 +642,9 @@ export class GameEngine {
         if (conf.projectileType === 'orbit') {
             const alreadyActive = this.bullets.some(b => b.ownerId === card.id && !b.isDead);
             if (alreadyActive) return; // Only spawn one
-            // Else spawn it below
         }
 
         // Persistent Weapon Logic: Tracking Glaive
-        // Note: art_track uses 'projectile' in config for backward compat, but we override logic by ID or add new type
-        // Let's rely on ID check for the specific 'art_track' behavior requested
         if (card.id.startsWith('art_track')) {
              const alreadyActive = this.bullets.some(b => b.ownerId === card.id && !b.isDead);
              if (alreadyActive) return;
@@ -752,8 +765,6 @@ export class GameEngine {
         if (isBack) {
             angles.forEach(a => angles.push(a + Math.PI)); // Add reverse shot for every shot
         }
-
-        // Filter angles? No, let them stack.
         
         angles.forEach(angle => {
             this.createBullet(conf, angle, buffs, track, card.id);
@@ -932,15 +943,26 @@ export class GameEngine {
                 e.tint = 0xffffff;
             }
 
+            // Normal Movement
             const dx = playerPos.x - e.x;
             const dy = playerPos.y - e.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
             
+            let moveSpeed = (1 + (this.wave * 0.005)) * delta;
+            
+            // Physics: Knockback Decay
+            e.knockbackVx *= 0.9;
+            e.knockbackVy *= 0.9;
+
+            // Apply movement + knockback
             if (dist > 10) {
-                const moveSpeed = (1 + (this.wave * 0.005)) * delta;
                 e.x += (dx / dist) * moveSpeed;
                 e.y += (dy / dist) * moveSpeed;
             }
+            
+            // Apply Knockback velocity
+            e.x += e.knockbackVx * delta;
+            e.y += e.knockbackVy * delta;
 
             if (e.isBurning) {
                 e.hp -= 0.1 * delta;
@@ -966,9 +988,6 @@ export class GameEngine {
                     b.isDead = true;
                     b.parent?.removeChild(b);
                 }
-                // Wind stays on player? Or moves out? 
-                // "Blow enemies away". Moving center is good.
-                // Keep existing physics.
                 b.duration -= delta;
                 return; // Custom logic done, skip standard movement
             }
@@ -1182,14 +1201,12 @@ export class GameEngine {
     applyDamage(e: Entity, b: Bullet) {
         let dmg = b.damage;
 
-        e.hitFlashTimer = 5; 
-
         if (b.element === ElementType.WIND) {
-            // Massive Knockback
+            // Physics Knockback instead of Teleport
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
-            e.x += Math.cos(angle) * 80; // Hard push
-            e.y += Math.sin(angle) * 80;
-            // Wind deals no damage usually, just control
+            // Strong push
+            e.knockbackVx += Math.cos(angle) * 10;
+            e.knockbackVy += Math.sin(angle) * 10;
         }
 
         if (b.element === ElementType.FIRE) {
@@ -1203,8 +1220,9 @@ export class GameEngine {
         if (b.element === ElementType.WATER) {
             e.isWet = true;
             const angle = Math.atan2(e.y - b.y, e.x - b.x);
-            e.x += Math.cos(angle) * 20; 
-            e.y += Math.sin(angle) * 20;
+            // Medium push
+            e.knockbackVx += Math.cos(angle) * 5; 
+            e.knockbackVy += Math.sin(angle) * 5;
             
             if (e.isBurning) {
                 e.isBurning = false; 
@@ -1226,14 +1244,18 @@ export class GameEngine {
             }
         }
 
-        e.hp -= dmg;
-        this.spawnParticle(e.x, e.y, b.color, 3);
-
-        this.damageTextCooldown--;
-        if (this.damageTextCooldown <= 0 || dmg > 10) { 
-            this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffffff);
-            this.damageTextCooldown = 2; 
+        if (dmg > 0) {
+            e.hp -= dmg;
+            e.hitFlashTimer = 5; 
+            
+            this.damageTextCooldown--;
+            if (this.damageTextCooldown <= 0 || dmg > 10) { 
+                this.spawnText(Math.round(dmg).toString(), e.x, e.y - 20, 0xffffff);
+                this.damageTextCooldown = 2; 
+            }
         }
+
+        this.spawnParticle(e.x, e.y, b.color, 3);
     }
 
     triggerChainLightning(source: Entity, dmg: number) {
@@ -1358,7 +1380,13 @@ export class GameEngine {
 
     addCard(card: CardDef) {
         if (card.type === CardType.STAT && card.statBonus) {
-            if (card.statBonus.hpPercent) this.stats.maxHp *= (1 + card.statBonus.hpPercent);
+            if (card.statBonus.hpPercent) {
+                const increase = this.stats.maxHp * card.statBonus.hpPercent;
+                this.stats.maxHp += increase;
+                // Correctly update Entity Stats
+                this.player.maxHp = this.stats.maxHp;
+                this.player.hp += increase; // Heal for the amount gained
+            }
             if (card.statBonus.dmgPercent) this.stats.damageMultiplier *= (1 + card.statBonus.dmgPercent);
             if (card.statBonus.pickupPercent) this.stats.pickupRange *= (1 + card.statBonus.pickupPercent);
         } else {

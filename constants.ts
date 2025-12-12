@@ -36,9 +36,9 @@ export const ARTIFACT_CARDS: CardDef[] = [
     artifactConfig: { cooldown: 10, baseDamage: 2, element: ElementType.FIRE, projectileType: 'area', color: 0xff4500 }
   },
   { 
-    id: 'art_wind', name: '风囊', description: '强力吹飞敌人 (CD较长)', 
+    id: 'art_wind', name: '风囊', description: '强力吹飞敌人', 
     type: CardType.ARTIFACT, rarity: Rarity.SILVER, iconColor: '#88ff88', 
-    artifactConfig: { cooldown: 120, baseDamage: 0, element: ElementType.WIND, projectileType: 'area', color: 0xccffcc }
+    artifactConfig: { cooldown: 250, baseDamage: 0, element: ElementType.WIND, projectileType: 'area', color: 0xccffcc }
   },
   { 
     id: 'art_water', name: '白玉神盂', description: '喷射水流击退敌人，扑灭火焰', 

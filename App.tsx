@@ -88,16 +88,7 @@ const App = () => {
                 }
             });
             
-            // Re-calc highlights on drag end
             gridRef.current.on('dragEnd', () => {
-               // Trigger a re-render or state update to refresh highlights if needed
-               // For now, react state update on resume handles logic, 
-               // visuals in drag might need raw DOM manipulation or force update
-               // but react won't re-render items inside muuri easily without destruction.
-               // We will rely on static rendering of highlights based on order.
-               // Since Muuri changes DOM order, we need to sync state to see highlights update?
-               // Realtime update with Muuri + React is tricky. 
-               // For this task, we'll sync on resume, but we can try to sync on drop if we want live range updates.
                syncInventoryFromMuuri(); 
             });
 
@@ -159,30 +150,35 @@ const App = () => {
   };
 
   // Helper to determine if a slot is affected by previous effect cards
-  // This mimics the Engine logic to show UI hints
   const calculateCardEffects = () => {
       if (!stats) return { affected: new Set<number>(), sources: new Set<number>() };
       
       const affected = new Set<number>();
       const sources = new Set<number>();
-      const activeEffects: { logic: string, count: number, sourceIndex: number }[] = [];
+      
+      // Mimic Engine Logic
+      // 1. Separate aging from new effects to handle single-stack correctly in visualization
+      let activeEffects: { logic: string, count: number, sourceIndex: number }[] = [];
       
       stats.inventory.forEach((card, index) => {
-          // If this card is being influenced, mark it
+          // Check if this card is affected by anything currently active
           if (activeEffects.length > 0) {
               affected.add(index);
           }
 
-          // Determine Repetition Count based on active 'double' effects
+          // Determine current repetition (for stacking effect cards)
           let executionCount = 1;
           activeEffects.forEach(eff => {
               if (eff.logic === 'double') executionCount *= 2;
           });
 
+          const newEffects = [];
+
           if (card.type === CardType.EFFECT && card.effectConfig) {
              sources.add(index);
+             // Logic stacking
              for(let i=0; i<executionCount; i++) {
-                 activeEffects.push({
+                 newEffects.push({
                      logic: card.effectConfig.logic,
                      count: card.effectConfig.influenceCount,
                      sourceIndex: index
@@ -190,11 +186,13 @@ const App = () => {
              }
           }
 
-          // Decrement counts
+          // Age existing effects. 
+          // New effects added THIS iteration do not age yet (they apply to next card)
           activeEffects.forEach(eff => eff.count--);
-          for(let i=activeEffects.length-1; i>=0; i--) {
-              if (activeEffects[i].count <= 0) activeEffects.splice(i, 1);
-          }
+          activeEffects = activeEffects.filter(eff => eff.count > 0);
+          
+          // Add new
+          activeEffects.push(...newEffects);
       });
       return { affected, sources };
   };
@@ -331,8 +329,8 @@ const App = () => {
          <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
            <h2 className="pause-title mb-4">暂停 / 装备调整</h2>
            <p className="pause-desc mb-8">
-             拖动卡片调整顺序。效果卡片(Effect)会影响排列在它后面的卡片。<br/>
-             青色发光为效果源，虚线框内为受影响卡片。
+             拖动卡片调整顺序。效果卡片会影响排列在它后面的卡片。<br/>
+             <span className="text-purple-400">紫色光辉</span>为效果源，<span className="text-cyan-400">青色虚线</span>为受影响卡片。
            </p>
            
            <div className="pause-layout">
@@ -349,11 +347,6 @@ const App = () => {
                            </div>
                            <div className="details-type">{selectedCard.rarity} {selectedCard.type}</div>
                            <div className="details-desc">{selectedCard.description}</div>
-                           {selectedCard.type === CardType.EFFECT && (
-                               <div className="mt-4 text-sm text-cyan-400">
-                                   影响范围: {selectedCard.effectConfig?.influenceCount || 1} 格
-                               </div>
-                           )}
                        </>
                    ) : (
                        <div className="text-gray-500 italic">点击卡片查看详情</div>
