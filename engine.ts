@@ -282,6 +282,17 @@ export class GameEngine {
         this.waveTotalEnemies = 15; 
         this.waveDelayTimer = 0;
 
+        // Cleanup any existing entities from previous session
+        this.enemies.forEach(e => { e.destroy({children:true}); });
+        this.enemies = [];
+        this.bullets.forEach(b => { b.destroy({children:true}); });
+        this.bullets = [];
+        this.xpOrbs.forEach(x => { x.destroy(); });
+        this.xpOrbs = [];
+        this.obstacles.forEach(o => o.destroy());
+        this.obstacles = [];
+        this.generatedChunks.clear();
+
         this.updateMapChunks();
         this.onGameStateChange(GameState.PLAYING);
     }
@@ -691,7 +702,8 @@ export class GameEngine {
             let currentSource = { x: this.player.x, y: this.player.y };
             let potentialTargets = this.enemies.filter(e => {
                 const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
-                return d < range && !e.isDead;
+                // CRITICAL FIX: Ensure !e.destroyed
+                return d < range && !e.isDead && !e.destroyed;
             });
             potentialTargets.sort((a,b) => Math.hypot(a.x-this.player.x, a.y-this.player.y) - Math.hypot(b.x-this.player.x, b.y-this.player.y));
 
@@ -736,10 +748,12 @@ export class GameEngine {
         if (this.isAutoAim) {
             let minD = 99999;
             this.enemies.forEach(e => {
+                // Safety
+                if (e.isDead || e.destroyed) return;
                 const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
                 if (d < minD) { minD = d; targetEnemy = e; }
             });
-            if (targetEnemy) {
+            if (targetEnemy && !targetEnemy.destroyed) {
                 baseAngle = Math.atan2(targetEnemy.y - this.player.y, targetEnemy.x - this.player.x);
             } else {
                 const dx = this.mouse.x - (SCREEN_WIDTH / 2);
@@ -937,7 +951,8 @@ export class GameEngine {
         const playerPos = { x: this.player.x, y: this.player.y };
         
         this.enemies.forEach(e => {
-            if (e.isDead) return;
+            // CRITICAL FIX: Check destroyed or dead
+            if (e.isDead || e.destroyed) return;
 
             if (e.hitFlashTimer > 0) {
                 e.hitFlashTimer -= delta;
@@ -962,7 +977,7 @@ export class GameEngine {
                 // For < 50 enemies simple iteration is ok
                 if (this.enemies.length < 50) {
                     this.enemies.forEach(other => {
-                        if (e === other) return;
+                        if (e === other || other.isDead || other.destroyed) return;
                         const idx = e.x - other.x;
                         const idy = e.y - other.y;
                         const idist = Math.sqrt(idx*idx + idy*idy);
@@ -988,12 +1003,12 @@ export class GameEngine {
             if (e.hp <= 0) this.killEnemy(e);
         });
 
-        this.enemies = this.enemies.filter(e => !e.isDead);
+        this.enemies = this.enemies.filter(e => !e.isDead && !e.destroyed);
     }
 
     updateBullets(delta: number) {
         this.bullets.forEach(b => {
-            if (b.isDead) return;
+            if (b.isDead || b.destroyed) return;
             
             // --- Visual Expansions ---
             if (b.element === ElementType.WIND) {
@@ -1064,6 +1079,7 @@ export class GameEngine {
                         let closest = null;
                         let minD = 500; 
                         for(const e of this.enemies) {
+                            if (e.isDead || e.destroyed) continue;
                             const d = Math.hypot(e.x - this.player.x, e.y - this.player.y);
                             if(d < minD) { minD = d; closest = e; }
                         }
@@ -1074,8 +1090,10 @@ export class GameEngine {
                     }
                 }
                 else if (b.state === 'ATTACK') {
-                     if (!b.target || b.target.isDead) {
+                     // CRITICAL FIX: Ensure target is valid before access
+                     if (!b.target || b.target.isDead || b.target.destroyed) {
                          b.state = 'IDLE';
+                         b.target = null;
                          return;
                      }
                      const dx = b.target.x - b.x;
@@ -1097,6 +1115,7 @@ export class GameEngine {
                     b.attackTimer! -= delta;
                     // AoE Damage
                     this.enemies.forEach(e => {
+                        if (e.isDead || e.destroyed) return;
                         const d = Math.hypot(e.x - b.x, e.y - b.y);
                         if (d < 50) {
                             this.applyDamage(e, b); // Will throttle damage via hitList logic usually, but here we want pure DPS
@@ -1127,6 +1146,7 @@ export class GameEngine {
                 let nearest = null;
                 let minDst = 1000;
                 for (const e of this.enemies) {
+                    if (e.isDead || e.destroyed) continue;
                     const d = Math.hypot(e.x - b.x, e.y - b.y);
                     if (d < minDst) { minDst = d; nearest = e; }
                 }
@@ -1156,7 +1176,7 @@ export class GameEngine {
                 b.y += b.vy * delta;
             }
         });
-        this.bullets = this.bullets.filter(b => !b.isDead);
+        this.bullets = this.bullets.filter(b => !b.isDead && !b.destroyed);
     }
 
     killBullet(b: Bullet) {
@@ -1242,6 +1262,7 @@ export class GameEngine {
     handleCollisions(delta: number) {
         if (this.player.invulnTimer <= 0) {
             for (const e of this.enemies) {
+                 if (e.isDead || e.destroyed) continue;
                  const dx = this.player.x - e.x;
                  const dy = this.player.y - e.y;
                  const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1260,10 +1281,10 @@ export class GameEngine {
         }
 
         for (const b of this.bullets) {
-            if (b.isDead) continue;
+            if (b.isDead || b.destroyed) continue;
             
             for (const e of this.enemies) {
-                if (e.isDead) continue;
+                if (e.isDead || e.destroyed) continue;
                 if (b.hitList.has(this.getObjectId(e))) continue;
 
                 let hitRadius = b.radius;
@@ -1328,9 +1349,13 @@ export class GameEngine {
         }
 
         if (Math.random() > 0.5) this.spawnParticle(e.x, e.y, b.color, 2);
+        
+        // Ensure kill logic
+        if (e.hp <= 0 && !e.isDead) this.killEnemy(e);
     }
 
     killEnemy(e: Entity) {
+        if (e.isDead || e.destroyed) return;
         e.isDead = true;
         this.world.removeChild(e);
         e.destroy({ children: true }); 
