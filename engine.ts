@@ -16,6 +16,9 @@ type Entity = Container & {
     isWet: boolean;
     wetTimer: number;
     isElectrified: boolean;
+    // Movement
+    dashCooldown: number;
+    isDashing: boolean;
 }
 
 type Bullet = Container & {
@@ -32,6 +35,9 @@ type Bullet = Container & {
     target?: Entity;
     pierce: number;
     hitList: Set<number>; // Enemy IDs hit
+    // Visuals
+    trail?: Graphics;
+    history?: {x: number, y: number}[];
 }
 
 type Particle = Graphics & {
@@ -173,12 +179,9 @@ export class GameEngine {
         const cont = new Container() as Entity;
         
         const g = new Graphics();
-        g.beginFill(0xffffff);
-        g.drawRect(-8, -8, 16, 16); // Pixel body
-        g.endFill();
-        g.beginFill(0x4444ff); // Cape
-        g.drawRect(-6, -6, 12, 12);
-        g.endFill();
+        // Pixi v8 syntax
+        g.rect(-8, -8, 16, 16).fill(0xffffff); // Pixel body
+        g.rect(-6, -6, 12, 12).fill(0x4444ff); // Cape
 
         cont.addChild(g);
         cont.x = SCREEN_WIDTH / 2;
@@ -190,6 +193,10 @@ export class GameEngine {
         cont.radius = 10;
         cont.isDead = false;
         cont.zIndex = 100;
+        
+        cont.dashCooldown = 0;
+        cont.isDashing = false;
+
         return cont;
     }
 
@@ -207,18 +214,14 @@ export class GameEngine {
             const type = Math.random();
             if (type < 0.3) {
                 // Tree
-                obs.beginFill(0x228b22);
-                obs.drawCircle(0, 0, 20 + Math.random() * 20);
+                obs.circle(0, 0, 20 + Math.random() * 20).fill(0x228b22);
             } else if (type < 0.6) {
                 // Rock
-                obs.beginFill(0x555555);
-                obs.drawRect(-15, -15, 30, 30);
+                obs.rect(-15, -15, 30, 30).fill(0x555555);
             } else {
                 // Wall
-                obs.beginFill(0x8b4513);
-                obs.drawRect(-10, -30, 20, 60);
+                obs.rect(-10, -30, 20, 60).fill(0x8b4513);
             }
-            obs.endFill();
             
             // Random pos relative to center
             const range = this.mapType === MapType.FIXED ? 1000 : 3000;
@@ -261,7 +264,26 @@ export class GameEngine {
     }
 
     handleMouseDown = () => {
-        // Manual fire maybe? For now auto-fire.
+        if (this.state !== GameState.PLAYING) return;
+        
+        // Dash Ability
+        if (this.player.dashCooldown <= 0) {
+            const dx = this.mouse.x - (SCREEN_WIDTH / 2);
+            const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
+            const dist = Math.hypot(dx, dy);
+            
+            if (dist > 1) {
+                // Normalize and boost
+                this.player.vx = (dx / dist) * 20; // High speed for dash
+                this.player.vy = (dy / dist) * 20;
+                this.player.isDashing = true;
+                this.player.dashCooldown = 60; // 1 second cooldown (at 60fps)
+                
+                // Visual feedback
+                this.spawnParticle(this.player.x, this.player.y, 0xffffff, 10);
+                this.spawnText("Dash!", this.player.x, this.player.y - 30, 0x00ffff);
+            }
+        }
     }
 
     update(ticker: Ticker) {
@@ -308,6 +330,23 @@ export class GameEngine {
     }
 
     updatePlayerMovement() {
+        // Cooldown
+        if (this.player.dashCooldown > 0) this.player.dashCooldown -= 1;
+
+        if (this.player.isDashing) {
+            // Apply dash velocity with high friction
+            this.player.x += this.player.vx;
+            this.player.y += this.player.vy;
+            this.player.vx *= 0.85;
+            this.player.vy *= 0.85;
+
+            // End dash if slow enough
+            if (Math.abs(this.player.vx) < 1 && Math.abs(this.player.vy) < 1) {
+                this.player.isDashing = false;
+            }
+            return; // Skip normal movement input during dash
+        }
+
         if (this.isMoveMode) {
             const dx = this.mouse.x - (SCREEN_WIDTH / 2);
             const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
@@ -353,14 +392,12 @@ export class GameEngine {
         const color = isBoss ? 0xff0000 : (this.wave % 2 === 0 ? 0x00ff00 : 0xffaa00);
         const size = isBoss ? 40 : (10 + Math.min(this.wave, 20));
 
-        g.beginFill(color);
         if (this.wave > 50) {
             // Cool shape for high levels
-            g.drawStar(0, 0, 5, size, size/2);
+            g.star(0, 0, 5, size, size/2).fill(color);
         } else {
-            g.drawCircle(0, 0, size);
+            g.circle(0, 0, size).fill(color);
         }
-        g.endFill();
 
         cont.addChild(g);
         cont.x = x;
@@ -475,30 +512,29 @@ export class GameEngine {
         let speed = 5 * buffs.speedMult;
         let life = 60 * buffs.rangeMult;
         
-        g.beginFill(conf.color);
+        // Pixi v8 syntax
         if (conf.projectileType === 'projectile') {
-            g.drawCircle(0, 0, 5);
+            g.circle(0, 0, 5).fill(conf.color);
         } else if (conf.projectileType === 'beam') {
-            g.drawRect(0, -5, 40, 10);
+            g.rect(0, -5, 40, 10).fill(conf.color);
             speed = 10 * buffs.speedMult;
         } else if (conf.projectileType === 'area') {
             g.moveTo(0,0);
             g.arc(0,0, 100 * buffs.rangeMult, -0.5, 0.5); 
             g.lineTo(0,0);
-            g.alpha = 0.5;
+            g.fill({ color: conf.color, alpha: 0.5 });
             life = 10; 
             speed = 0; 
             if (conf.element === ElementType.FIRE) speed = 3; 
         } else if (conf.projectileType === 'orbit') {
-            g.drawRect(-5, -20, 10, 40); 
+            g.rect(-5, -20, 10, 40).fill(conf.color); 
             speed = 0;
             life = 9999; 
         } else if (conf.projectileType === 'lightning') {
             speed = 0;
             life = 5;
         }
-        g.endFill();
-
+        
         b.addChild(g);
         
         if (conf.projectileType === 'orbit') {
@@ -523,12 +559,20 @@ export class GameEngine {
         b.hitList = new Set();
         b.pierce = (conf.projectileType === 'area' || conf.projectileType === 'orbit') ? 999 : 1;
 
+        // Trail Logic
+        if (conf.projectileType === 'projectile' || tracking) {
+            b.trail = this.createTrail(conf.color);
+            b.history = [];
+            // Add trail to world, not bullet, so it doesn't move with bullet transform
+            this.world.addChildAt(b.trail, 0);
+        }
+
         this.bullets.push(b);
         this.world.addChild(b);
     }
 
     createTrail(color: number) {
-        return new Container(); 
+        return new Graphics(); 
     }
 
     updateEnemies(delta: number) {
@@ -565,6 +609,7 @@ export class GameEngine {
             if (b.duration <= 0) {
                 b.isDead = true;
                 b.parent?.removeChild(b);
+                b.trail?.parent?.removeChild(b.trail);
                 return;
             }
 
@@ -589,6 +634,23 @@ export class GameEngine {
             } else {
                 b.x += b.vx;
                 b.y += b.vy;
+            }
+
+            // Update Trail
+            if (b.trail && b.history) {
+                b.history.push({x: b.x, y: b.y});
+                if (b.history.length > 8) b.history.shift();
+                
+                b.trail.clear();
+                if (b.history.length > 1) {
+                    b.trail.moveTo(b.history[0].x, b.history[0].y);
+                    for (let i = 1; i < b.history.length; i++) {
+                        b.trail.lineTo(b.history[i].x, b.history[i].y);
+                    }
+                    const child = b.children[0] as Graphics;
+                    // v8 stroke
+                    b.trail.stroke({ width: 2, color: 0xffffff, alpha: 0.3 });
+                }
             }
         });
         this.bullets = this.bullets.filter(b => !b.isDead);
@@ -648,6 +710,7 @@ export class GameEngine {
                     if (b.pierce <= 0) {
                         b.isDead = true;
                         b.parent?.removeChild(b);
+                        b.trail?.parent?.removeChild(b.trail);
                         break; 
                     }
                 }
@@ -709,7 +772,7 @@ export class GameEngine {
                 const g = new Graphics();
                 g.moveTo(source.x, source.y);
                 g.lineTo(target.x, target.y);
-                g.stroke({ width: 2, color: 0xffff00 }); // v8 stroke API
+                g.stroke({ width: 2, color: 0xffff00 }); 
                 this.world.addChild(g);
                 setTimeout(() => g.parent?.removeChild(g), 100);
             }
@@ -729,9 +792,7 @@ export class GameEngine {
         if (this.wave > 30) { color = 0x0000ff; size = 8; }
         if (this.wave > 80) { color = 0xff00ff; size = 12; }
 
-        orb.beginFill(color);
-        orb.drawRect(-size/2, -size/2, size, size);
-        orb.endFill();
+        orb.rect(-size/2, -size/2, size, size).fill(color);
         orb.x = e.x;
         orb.y = e.y;
         orb.value = val;
@@ -782,9 +843,7 @@ export class GameEngine {
     spawnParticle(x: number, y: number, color: number, count = 3) {
         for(let i=0; i<count; i++) {
             const p = new Graphics() as Particle;
-            p.beginFill(color);
-            p.drawRect(0,0, 2,2);
-            p.endFill();
+            p.rect(0,0, 2,2).fill(color);
             p.x = x;
             p.y = y;
             p.vx = (Math.random()-0.5) * 4;

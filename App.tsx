@@ -16,6 +16,9 @@ const App = () => {
   useEffect(() => {
     if (!canvasRef.current) return;
     
+    // Prevent double initialization if engine already exists (Strict Mode)
+    if (engineRef.current) return;
+
     const engine = new GameEngine(
       canvasRef.current,
       (newStats) => setStats({...newStats}), // Update stats
@@ -35,10 +38,26 @@ const App = () => {
     );
     engineRef.current = engine;
     
-    engine.init().catch(e => console.error("Engine Init Failed", e));
+    // Attempt initialization
+    const initEngine = async () => {
+        try {
+            await engine.init();
+        } catch (e: any) {
+            console.error("Engine Init Failed", e);
+            // If the error is the specific Pixi extension batcher error, it means
+            // Pixi is likely already initialized in the global scope (hot reload/strict mode issue).
+            // We can often safely ignore this in dev environments if the canvas attaches correctly.
+        }
+    };
+    
+    initEngine();
 
     return () => {
-      engine.destroy();
+      // Clean up on unmount
+      if (engineRef.current) {
+          engineRef.current.destroy();
+          engineRef.current = null;
+      }
     };
   }, []);
 
@@ -95,6 +114,7 @@ const App = () => {
           </div>
           <div className="instructions mt-8 text-center">
             操作: 鼠标瞄准, F 键移动 (跟随鼠标), S 键站立.<br/>
+            左键点击: 冲刺 (Dash).<br/>
             Esc 暂停/整理背包.
           </div>
         </div>
