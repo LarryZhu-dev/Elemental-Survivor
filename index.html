@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Elemental Survivor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      @font-face {
+        font-family: 'PixelFont';
+        src: url('https://cdn.jsdelivr.net/fontsource/fonts/fusion-pixel-12px-proportional-tc@latest/latin-400-normal.woff2') format('woff2');
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #1a1a1a;
+        font-family: 'PixelFont', sans-serif;
+        user-select: none;
+      }
+      canvas {
+        display: block;
+      }
+      /* Custom Scrollbar for Inventory */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #2d2d2d; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #555; 
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #777; 
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "pixi.js": "https://esm.sh/pixi.js@^8.14.3"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

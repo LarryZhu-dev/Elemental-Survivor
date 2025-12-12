@@ -1,0 +1,5 @@
+{
+  "name": "Elemental Survivor",
+  "description": "A 2D Pixel-art Roguelike game with complex elemental interactions and a card-chaining skill system.",
+  "requestFramePermissions": []
+}
