@@ -196,7 +196,7 @@ const App = () => {
            <h2 className="pause-title mb-4">暂停 / 装备调整</h2>
            <p className="pause-desc mb-8">
              拖动卡片调整顺序。效果卡片(Effect)会影响排列在它后面的技能(Artifact)。<br/>
-             例如: [双重触发] -> [火葫芦] = 双倍火焰。
+             例如: [双重触发] &rarr; [火葫芦] = 双倍火焰。
            </p>
            
            <div className="inv-grid gap-2">
