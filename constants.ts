@@ -100,7 +100,7 @@ export const BUFF_CARDS: CardDef[] = [
 
 export const ALL_CARDS = [...STAT_CARDS, ...ARTIFACT_CARDS, ...EFFECT_CARDS, ...BUFF_CARDS];
 
-export const getRandomCard = (wave: number, currentInventory: CardDef[] = []): CardDef => {
+export const getRandomCard = (wave: number, currentInventory: CardDef[] = [], excludeList: CardDef[] = []): CardDef => {
     // Rarity weights based on wave
     const prismChance = Math.min(0.2 + (wave / 100) * 10, 15); // 0.2% to 10%
     const goldChance = Math.min(5 + (wave / 100) * 40, 50); // 5% to 45%
@@ -115,20 +115,26 @@ export const getRandomCard = (wave: number, currentInventory: CardDef[] = []): C
         // Match Rarity
         if (c.rarity !== targetRarity) return false;
         
-        // Prevent Duplicate Artifacts
+        // Prevent Duplicate Artifacts in Inventory
         if (c.type === CardType.ARTIFACT) {
-            // Check if we already have an artifact with this name/ID base
-            // (Using ID base comparison in case we have logic to upgrade later, but strict check is fine for now)
             const alreadyHas = currentInventory.some(invItem => invItem.id === c.id);
             if (alreadyHas) return false;
         }
+
+        // Prevent Duplicates in current selection options (Exclude List)
+        // Check by base ID (before generateId adds random suffix)
+        const isExcluded = excludeList.some(ex => ex.name === c.name); // Using name is safer for "template" comparison here
+        if (isExcluded) return false;
+
         return true;
     });
 
     // Fallback if pool is empty (e.g. collected all gold artifacts), downgrade rarity or pick stat
     let finalPool = pool;
     if (finalPool.length === 0) {
-        finalPool = STAT_CARDS; // Fallback to stats
+        finalPool = STAT_CARDS.filter(c => !excludeList.some(ex => ex.name === c.name)); 
+        // If still empty (extremely rare), just allow duplicates
+        if (finalPool.length === 0) finalPool = STAT_CARDS;
     }
 
     const template = finalPool[Math.floor(Math.random() * finalPool.length)];

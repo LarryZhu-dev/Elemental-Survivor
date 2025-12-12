@@ -240,14 +240,13 @@
         max-width: 32rem; /* lg */
       }
       .inv-grid {
+        position: relative; /* Required for Muuri */
         width: 800px;
-        display: flex;
-        flex-wrap: wrap;
+        /* flex-wrap removed for muuri, handled by absolute positioning */
         padding: 1rem;
         border: 2px solid #4b5563; /* gray-600 */
         background-color: #111827; /* gray-900 */
         min-height: 200px;
-        align-content: flex-start;
       }
       .inv-slot {
         width: 4rem;
@@ -260,21 +259,24 @@
         font-size: 0.75rem; /* xs */
         text-align: center;
         cursor: grab;
-        position: relative;
+        position: absolute; /* Muuri requires absolute positioning for items */
         transition: transform 0.2s, background-color 0.2s;
         box-sizing: border-box;
+        margin: 5px; /* Margin for muuri gaps */
+        z-index: 1;
       }
-      .inv-slot:active { cursor: grabbing; transform: scale(0.95); }
-      .inv-slot.dragging { opacity: 0.5; }
+      .inv-slot:active { cursor: grabbing; }
+      .inv-slot.muuri-item-dragging {
+        z-index: 3;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+      }
+      .inv-slot.muuri-item-releasing {
+        z-index: 2;
+      }
+      .inv-slot.muuri-item-hidden {
+        z-index: 0;
+      }
       
-      /* New Drag Visuals */
-      .inv-slot-placeholder {
-        width: 4rem;
-        height: 4rem;
-        border: 2px dashed #666;
-        background: rgba(255,255,255,0.1);
-      }
-
       .badge {
         position: absolute;
         top: 0;
@@ -366,7 +368,9 @@
     "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "pixi.js": "https://esm.sh/pixi.js@^8.14.3"
+    "pixi.js": "https://esm.sh/pixi.js@^8.14.3",
+    "muuri": "https://esm.sh/muuri@0.9.5",
+    "web-animations-js": "https://esm.sh/web-animations-js@2.3.2"
   }
 }
 </script>

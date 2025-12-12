@@ -56,6 +56,11 @@ type XPOrb = Graphics & {
     vy: number;
 }
 
+interface DelayedAction {
+    timer: number;
+    action: () => void;
+}
+
 export class GameEngine {
     app: Application;
     canvas: HTMLCanvasElement;
@@ -92,6 +97,9 @@ export class GameEngine {
     // Performance
     damageTextPool: Text[] = []; // Simple pool idea, or just throttling
     damageTextTimer: number = 0;
+
+    // Action Queue for "Double Trigger"
+    delayedActions: DelayedAction[] = [];
 
     // Callbacks to React
     onUpdateStats: (stats: PlayerStats) => void;
@@ -332,6 +340,15 @@ export class GameEngine {
         if (this.state !== GameState.PLAYING) return;
         
         this.gameTime += delta;
+
+        // Process delayed actions (for Double Trigger effects)
+        for (let i = this.delayedActions.length - 1; i >= 0; i--) {
+            this.delayedActions[i].timer -= delta;
+            if (this.delayedActions[i].timer <= 0) {
+                this.delayedActions[i].action();
+                this.delayedActions.splice(i, 1);
+            }
+        }
         
         // --- 1. Player Movement (Click to Move) ---
         this.updatePlayerMovement(delta);
@@ -522,7 +539,7 @@ export class GameEngine {
                 this.weaponCooldowns[card.id] -= delta * buffStats.freqMult;
 
                 if (this.weaponCooldowns[card.id] <= 0) {
-                    this.fireWeapon(card, modifiers, buffStats);
+                    this.triggerArtifact(card, modifiers, buffStats);
                     this.weaponCooldowns[card.id] = card.artifactConfig.cooldown;
                 }
 
@@ -532,54 +549,74 @@ export class GameEngine {
         }
     }
 
-    fireWeapon(card: CardDef, modifiers: { logic: string }[], buffs: any) {
+    triggerArtifact(card: CardDef, modifiers: { logic: string }[], buffs: any) {
+        let double = false;
+        modifiers.forEach(m => {
+            if (m.logic === 'double') double = true;
+        });
+
+        // Fire first shot immediately
+        this.executeCardLogic(card, modifiers, buffs);
+
+        // If double effect, schedule a second shot with delay
+        if (double) {
+            this.delayedActions.push({
+                timer: 15, // 15 frames delay (~0.25s at 60fps)
+                action: () => {
+                    this.executeCardLogic(card, modifiers, buffs);
+                }
+            });
+        }
+    }
+
+    executeCardLogic(card: CardDef, modifiers: { logic: string }[], buffs: any) {
         if (!card.artifactConfig) return;
         const conf = card.artifactConfig;
+
+        // Fix: Orbiting Sword Check (Prevent Duplicates)
+        if (conf.projectileType === 'orbit') {
+            const alreadyActive = this.bullets.some(b => b.ownerId === card.id && !b.isDead);
+            if (alreadyActive) return; // Do not spawn another if one is orbiting
+        }
         
         let isFan = false;
         let isRing = false;
         let isBack = false;
         let track = false;
-        let double = false;
 
         modifiers.forEach(m => {
-            if (m.logic === 'double') double = true;
             if (m.logic === 'split_back') isBack = true;
             if (m.logic === 'fan') isFan = true;
             if (m.logic === 'ring') isRing = true;
             if (m.logic === 'track') track = true;
         });
 
-        const fireCount = double ? 2 : 1;
+        // Aim at mouse (screen to relative)
+        const dx = this.mouse.x - (SCREEN_WIDTH / 2);
+        const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
+        let baseAngle = Math.atan2(dy, dx);
         
-        for (let fc = 0; fc < fireCount; fc++) {
-             // Aim at mouse (screen to relative)
-             const dx = this.mouse.x - (SCREEN_WIDTH / 2);
-             const dy = this.mouse.y - (SCREEN_HEIGHT / 2);
-             let baseAngle = Math.atan2(dy, dx);
-             
-             let projectileCount = 1;
-             if (isFan) projectileCount = 5;
-             if (isRing) projectileCount = 12;
+        let projectileCount = 1;
+        if (isFan) projectileCount = 5;
+        if (isRing) projectileCount = 12;
 
-             const angles: number[] = [];
-             
-             if (isRing) {
-                 for(let i=0; i<projectileCount; i++) angles.push(baseAngle + (Math.PI * 2 * i / projectileCount));
-             } else if (isFan) {
-                 for(let i=0; i<projectileCount; i++) angles.push(baseAngle + (i - 2) * 0.3);
-             } else {
-                 angles.push(baseAngle);
-             }
-
-             if (isBack) {
-                 angles.push(baseAngle + Math.PI);
-             }
-
-             angles.forEach(angle => {
-                 this.createBullet(conf, angle, buffs, track, card.id);
-             });
+        const angles: number[] = [];
+        
+        if (isRing) {
+            for(let i=0; i<projectileCount; i++) angles.push(baseAngle + (Math.PI * 2 * i / projectileCount));
+        } else if (isFan) {
+            for(let i=0; i<projectileCount; i++) angles.push(baseAngle + (i - 2) * 0.3);
+        } else {
+            angles.push(baseAngle);
         }
+
+        if (isBack) {
+            angles.push(baseAngle + Math.PI);
+        }
+
+        angles.forEach(angle => {
+            this.createBullet(conf, angle, buffs, track, card.id);
+        });
     }
 
     createBullet(conf: any, angle: number, buffs: any, tracking: boolean, ownerId: string) {
@@ -587,12 +624,9 @@ export class GameEngine {
         const g = new Graphics();
         
         // --- Visuals ---
-        // Use 'add' blend mode for glowy look
-        // We can't set blendMode on Container in v8 easily without filters or specific structure
-        // But we can set it on the Graphics child.
         
         let speed = 5 * buffs.speedMult;
-        let life = 180 * buffs.rangeMult; // Increased from 60 to 180 (3 seconds) to fix disappearance
+        let life = 180 * buffs.rangeMult; 
         
         if (conf.projectileType === 'projectile') {
             g.circle(0,0, 4).fill(0xffffff); // Core
@@ -717,7 +751,8 @@ export class GameEngine {
                 }
             }
 
-            if (b.ownerId === 'art_sword_orbit') {
+            if (b.ownerId.includes('art_sword_orbit')) { // Loose check for id as ownerId might be generated
+                // Orbit Logic
                 b.rotation += 0.1 * delta;
                 b.x = this.player.x + Math.cos(b.rotation) * 100;
                 b.y = this.player.y + Math.sin(b.rotation) * 100;

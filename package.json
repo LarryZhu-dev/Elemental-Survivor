@@ -11,7 +11,9 @@
   "dependencies": {
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "pixi.js": "^8.14.3"
+    "pixi.js": "^8.14.3",
+    "muuri": "0.9.5",
+    "web-animations-js": "2.3.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

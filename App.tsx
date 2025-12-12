@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameEngine } from './engine';
 import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
 import { getRandomCard, STAT_CARDS, COLORS } from './constants';
+import Muuri from 'muuri';
 
 const App = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -12,10 +13,10 @@ const App = () => {
   const [levelUpOptions, setLevelUpOptions] = useState<CardDef[]>([]);
   const [bossWarning, setBossWarning] = useState<string | null>(null);
   
-  // Drag State
-  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  
+  // Muuri Grid Ref
+  const gridRef = useRef<Muuri | null>(null);
+  const gridElementRef = useRef<HTMLDivElement>(null);
+
   // Initialize Engine
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -29,14 +30,16 @@ const App = () => {
       (newState) => {
           setGameState(newState);
           if (newState === GameState.LEVEL_UP) {
-              // Generate 3 random cards, passing inventory for deduplication
               const wave = engineRef.current?.wave || 1;
               const inv = engineRef.current?.stats.inventory || [];
-              const opts = [
-                  getRandomCard(wave, inv), 
-                  getRandomCard(wave, inv), 
-                  getRandomCard(wave, inv)
-              ];
+              const opts: CardDef[] = [];
+              
+              // Generate 3 unique options
+              for(let i=0; i<3; i++) {
+                  const card = getRandomCard(wave, inv, opts); // Pass existing options to exclude list
+                  opts.push(card);
+              }
+              
               setLevelUpOptions(opts);
           }
       },
@@ -67,6 +70,35 @@ const App = () => {
     };
   }, []);
 
+  // Initialize Muuri when entering Pause state
+  useEffect(() => {
+    if (gameState === GameState.PAUSED && gridElementRef.current && !gridRef.current) {
+        // Slight delay to ensure DOM is rendered
+        setTimeout(() => {
+            if (!gridElementRef.current) return;
+            gridRef.current = new Muuri(gridElementRef.current, {
+                dragEnabled: true,
+                layout: {
+                    fillGaps: true
+                },
+                dragSort: true,
+                dragStartPredicate: {
+                    distance: 10,
+                    delay: 0,
+                }
+            });
+        }, 100);
+    }
+
+    return () => {
+        // Destroy Muuri when leaving Pause state or component unmounts
+        if (gameState !== GameState.PAUSED && gridRef.current) {
+            gridRef.current.destroy();
+            gridRef.current = null;
+        }
+    };
+  }, [gameState]);
+
   const startGame = (mapType: MapType) => {
     engineRef.current?.start(mapType);
   };
@@ -77,80 +109,49 @@ const App = () => {
     setGameState(GameState.PLAYING);
   };
 
-  // --- Better Drag and Drop Logic ---
+  const handleResume = () => {
+      // Sync Muuri order to GameState
+      if (gridRef.current && stats) {
+          const items = gridRef.current.getItems();
+          const newInventory: CardDef[] = [];
+          
+          items.forEach(item => {
+              const el = item.getElement();
+              if (el) {
+                  const id = el.getAttribute('data-id');
+                  const card = stats.inventory.find(c => c.id === id);
+                  if (card) newInventory.push(card);
+              }
+          });
+          
+          if (newInventory.length === stats.inventory.length) {
+            engineRef.current?.reorderInventory(newInventory);
+            setStats({ ...stats, inventory: newInventory });
+          }
+      }
 
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-    setDraggingIndex(index);
-    e.dataTransfer.setData("index", index.toString());
-    e.dataTransfer.effectAllowed = "move";
-    
-    // Create a ghost image if needed, or rely on browser default. 
-    // Browser default is usually fine if the element isn't too complex.
+      setGameState(GameState.PLAYING);
+      engineRef.current?.resume();
+      
+      // Destroy Muuri explicitly
+      if (gridRef.current) {
+          gridRef.current.destroy();
+          gridRef.current = null;
+      }
   };
 
-  const handleDragEnter = (index: number) => {
-    if (draggingIndex === null) return;
-    if (draggingIndex === index) return;
-    setDragOverIndex(index);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault(); // Necessary to allow dropping
-  };
-
-  const handleDragEnd = () => {
-    setDraggingIndex(null);
-    setDragOverIndex(null);
-  };
-
-  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault();
-    const dragIndex = parseInt(e.dataTransfer.getData("index"));
-    
-    if (isNaN(dragIndex) || !stats) return;
-
-    const newInv = [...stats.inventory];
-    const [moved] = newInv.splice(dragIndex, 1);
-    
-    // If dropping on itself, or invalid, do nothing (logic handled by splice)
-    // But we need to insert at correct new position.
-    
-    // Calculate actual insertion index.
-    // If we drag from 0 to 5, we remove 0, then insert at 5.
-    // If we drag from 5 to 0, we remove 5, then insert at 0.
-    newInv.splice(dropIndex, 0, moved);
-    
-    engineRef.current?.reorderInventory(newInv);
-    setStats({ ...stats, inventory: newInv });
-    
-    setDraggingIndex(null);
-    setDragOverIndex(null);
-  };
-
-  // Render logic for inventory with gap preview
+  // Render logic for inventory with Muuri compatibility
   const renderInventory = () => {
       if (!stats) return null;
 
-      const items = stats.inventory.map((card, index) => {
-          const isDragging = draggingIndex === index;
-          
-          return (
-            <React.Fragment key={card.id}>
-              {/* Drop Target Gap Preview (If dragging something else and hovering here) */}
-              {dragOverIndex === index && draggingIndex !== null && draggingIndex > index && (
-                   <div className="inv-slot-placeholder" />
-              )}
-              
-              <div
-                 draggable
-                 onDragStart={(e) => handleDragStart(e, index)}
-                 onDragOver={handleDragOver}
-                 onDragEnter={() => handleDragEnter(index)}
-                 onDragEnd={handleDragEnd}
-                 onDrop={(e) => handleDrop(e, index)}
-                 className={`inv-slot group ${isDragging ? 'dragging' : ''}`}
-                 style={{ borderColor: card.iconColor }}
-               >
+      return stats.inventory.map((card) => (
+          <div
+             key={card.id}
+             data-id={card.id}
+             className="inv-slot group"
+             style={{ borderColor: card.iconColor }}
+           >
+             <div className="inv-slot-content w-full h-full flex items-center justify-center relative">
                  {card.type === CardType.EFFECT && <span className="badge badge-effect">E</span>}
                  {card.type === CardType.BUFF && <span className="badge badge-buff">B</span>}
                  
@@ -164,17 +165,9 @@ const App = () => {
                     <div className="text-tiny">{card.description}</div>
                     <div className="text-tiny text-gray-400 mt-1 uppercase">{card.rarity}</div>
                  </div>
-               </div>
-
-              {/* Drop Target Gap Preview (If dragging something else and hovering here) */}
-              {dragOverIndex === index && draggingIndex !== null && draggingIndex < index && (
-                   <div className="inv-slot-placeholder" />
-              )}
-            </React.Fragment>
-          );
-      });
-
-      return items;
+             </div>
+           </div>
+      ));
   }
 
   return (
@@ -284,15 +277,12 @@ const App = () => {
              例如: [双重触发] &rarr; [火葫芦] = 双倍火焰。
            </p>
            
-           <div className="inv-grid gap-2">
+           <div ref={gridElementRef} className="inv-grid gap-2">
              {renderInventory()}
            </div>
 
            <button 
-             onClick={() => {
-                setGameState(GameState.PLAYING);
-                engineRef.current?.resume();
-             }}
+             onClick={handleResume}
              className="btn-resume mt-8"
            >
              继续游戏
