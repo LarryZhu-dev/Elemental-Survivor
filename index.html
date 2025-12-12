@@ -298,64 +298,71 @@
         display: flex;
         gap: 2rem;
         align-items: flex-start;
+        width: 100%;
+        justify-content: center;
       }
       
-      /* Inventory Slot with Rarity Borders */
-      .inv-slot {
-        width: 4rem;
-        height: 4rem;
-        background-color: #334155; /* slate-700 */
+      /* Muuri Grid Styles */
+      .grid-container-wrapper {
+        width: 600px;
+        height: 500px;
+        background: rgba(0,0,0,0.3);
+        border: 2px solid #333;
+        border-radius: 8px;
+        overflow-y: auto;
+        position: relative;
+      }
+
+      .grid {
+        position: relative;
+        width: 100%;
+        /* Min height to allow dropping into empty list if needed */
+        min-height: 400px; 
+      }
+      
+      .item {
+        display: block;
+        position: absolute;
+        width: 70px;
+        height: 70px;
+        margin: 8px;
+        z-index: 1;
+        cursor: grab;
+      }
+      
+      .item:active {
+        cursor: grabbing;
+      }
+
+      .item.muuri-item-dragging {
+        z-index: 3;
+      }
+      .item.muuri-item-releasing {
+        z-index: 2;
+      }
+      .item.muuri-item-hidden {
+        z-index: 0;
+      }
+      
+      .item-content {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        background-color: #334155;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 0.75rem; /* xs */
+        font-size: 0.75rem;
         text-align: center;
-        cursor: grab;
         box-sizing: border-box;
-        margin: 5px; 
-        z-index: 1;
         border: 2px solid #555;
-        transition: box-shadow 0.2s, border-color 0.2s, transform 0.2s;
         box-shadow: 0 0 5px rgba(0,0,0,0.5);
       }
-      
-      .inv-slot:active { cursor: grabbing; }
 
-      /* Drag and Drop Visuals */
-      .inv-slot.is-dragging {
-        opacity: 0.4;
-        border-style: dashed;
-        transform: scale(0.9);
-      }
-      
-      .inv-slot.drop-target-before {
-        border-left: 4px solid #fde047; /* yellow-300 */
-        margin-left: 5px; /* Visual shift */
-      }
-
-      .append-zone {
-        width: 100%;
-        height: 4rem;
-        border: 2px dashed #4b5563;
-        border-radius: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        color: #9ca3af;
-        margin-top: 1rem;
-        cursor: pointer;
-        transition: background-color 0.2s;
-      }
-      .append-zone:hover, .append-zone.drag-over {
-        background-color: rgba(255, 255, 255, 0.1);
-        border-color: #fde047;
-        color: white;
-      }
-
-      /* Always show slight glow in inventory too */
-      .inv-slot.rarity-silver { border-color: #cbd5e1; box-shadow: 0 0 8px rgba(203, 213, 225, 0.3); }
-      .inv-slot.rarity-gold { border-color: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.3); }
-      .inv-slot.rarity-prismatic { 
+      /* Rarity Styles for Inventory Items */
+      .item-content.rarity-silver { border-color: #cbd5e1; box-shadow: 0 0 8px rgba(203, 213, 225, 0.3); }
+      .item-content.rarity-gold { border-color: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.3); }
+      .item-content.rarity-prismatic { 
         border-color: transparent;
         background: 
             linear-gradient(#334155, #334155) padding-box,
@@ -374,6 +381,7 @@
       }
       .badge-effect { background-color: #d946ef; color: white; font-weight: bold; }
       .badge-buff { background-color: #22d3ee; /* cyan-200 */ color: black; font-weight: bold; }
+      .badge-art { background-color: #facc15; color: black; font-weight: bold; }
 
       /* Details Panel */
       .details-panel {
@@ -508,7 +516,8 @@
     "react": "https://esm.sh/react@^19.2.3",
     "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
     "pixi.js": "https://esm.sh/pixi.js@^8.14.3",
-    "web-animations-js": "https://esm.sh/web-animations-js@2.3.2"
+    "web-animations-js": "https://esm.sh/web-animations-js@2.3.2",
+    "muuri": "https://esm.sh/muuri@0.9.5"
   }
 }
 </script>

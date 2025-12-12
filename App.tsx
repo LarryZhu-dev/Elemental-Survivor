@@ -1,7 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { GameEngine } from './engine';
 import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
 import { getRandomCard, ALL_CARDS } from './constants';
+import Muuri from 'muuri';
 
 // Extend window for gm
 declare global {
@@ -10,15 +12,86 @@ declare global {
     }
 }
 
-// Chain grouping helper
-interface CardChain {
-    cards: { card: CardDef; index: number; isExcess?: boolean }[];
-    isComplete: boolean; // Ended with a weapon
+// Helper to keep track of hovered item for details panel
+interface HoveredItem {
+    card: CardDef;
 }
+
+interface InventoryGridProps {
+    items: CardDef[];
+    onHover: (item: CardDef | null) => void;
+}
+
+const InventoryGrid = forwardRef(({ items, onHover }: InventoryGridProps, ref) => {
+    const containerRef = useRef<HTMLDivElement>(null);
+    const gridRef = useRef<any>(null);
+
+    useImperativeHandle(ref, () => ({
+        getOrder: () => {
+            if (!gridRef.current) return [];
+            // Get current order of elements
+            const gridItems = gridRef.current.getItems();
+            return gridItems.map((item: any) => item.getElement().getAttribute('data-id'));
+        }
+    }));
+
+    useEffect(() => {
+        if (!containerRef.current) return;
+
+        // Init Muuri
+        gridRef.current = new Muuri(containerRef.current, {
+            dragEnabled: true,
+            layoutOnInit: true,
+            dragContainer: document.body, // Allows dragging outside the scrollable area visually
+            dragSort: true,
+            layout: {
+                fillGaps: true,
+                horizontal: false,
+                alignRight: false,
+                alignBottom: false,
+                rounding: false
+            }
+        });
+
+        // Cleanup
+        return () => {
+            if (gridRef.current) {
+                gridRef.current.destroy();
+                gridRef.current = null;
+            }
+        };
+    }, []); // Only init once. We rebuild on re-mount of parent (Pause/Resume cycle)
+
+    return (
+        <div className="grid-container-wrapper">
+             <div ref={containerRef} className="grid">
+                {items.map((card) => (
+                    <div key={card.id} className="item" data-id={card.id}>
+                        <div 
+                            className={`item-content rarity-${card.rarity}`}
+                            onMouseEnter={() => onHover(card)}
+                            onMouseLeave={() => onHover(null)}
+                        >
+                             {card.type === CardType.EFFECT && <div className="badge badge-effect">EF</div>}
+                             {card.type === CardType.BUFF && <div className="badge badge-buff">BF</div>}
+                             {card.type === CardType.ARTIFACT && <div className="badge badge-art">ART</div>}
+                             
+                             <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
+                                 {card.name.substring(0,2)}
+                             </span>
+                        </div>
+                    </div>
+                ))}
+             </div>
+        </div>
+    );
+});
+
 
 const App = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
+  const gridComponentRef = useRef<any>(null);
 
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
   const [stats, setStats] = useState<PlayerStats | null>(null);
@@ -27,11 +100,9 @@ const App = () => {
   const [aimStatus, setAimStatus] = useState<string>("自动");
   const [isGmMode, setIsGmMode] = useState(false);
   
-  // Drag and Drop State
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
-  const [isDragOverAppend, setIsDragOverAppend] = useState(false);
-  
+  // Hover state for inventory details
+  const [hoveredCard, setHoveredCard] = useState<CardDef | null>(null);
+
   useEffect(() => {
      window.gm = () => {
          setIsGmMode(prev => !prev);
@@ -123,193 +194,29 @@ const App = () => {
   };
 
   const handleResume = () => {
-      if (stats) {
-         engineRef.current?.reorderInventory(stats.inventory);
+      if (gridComponentRef.current && stats && engineRef.current) {
+          const newOrderIds: string[] = gridComponentRef.current.getOrder();
+          
+          // Reconstruct inventory based on IDs
+          const map = new Map(stats.inventory.map(c => [c.id, c]));
+          const newInventory = newOrderIds.map(id => map.get(id)).filter(Boolean) as CardDef[];
+          
+          // Append any missing items (safety check)
+          const currentIds = new Set(newOrderIds);
+          const missing = stats.inventory.filter(c => !currentIds.has(c.id));
+          const finalInventory = [...newInventory, ...missing];
+          
+          engineRef.current.reorderInventory(finalInventory);
+          setStats({ ...engineRef.current.stats });
       }
+
       setGameState(GameState.PLAYING);
       engineRef.current?.resume();
-      setDraggedIndex(null);
+      setHoveredCard(null);
   };
-
-  // Inventory logic: Group into chains
-  const getChains = (): CardChain[] => {
-      if (!stats) return [];
-      const chains: CardChain[] = [];
-      let currentChain: { card: CardDef; index: number; isExcess?: boolean }[] = [];
-      let activeEffects: { logic: string, count: number }[] = [];
-
-      stats.inventory.forEach((card, index) => {
-          // Check limits for visual "Excess" styling
-          let isExcess = false;
-          if (card.type === CardType.EFFECT && card.effectConfig?.logic === 'double') {
-              // Count current doubles in activeEffects
-              const doubleCount = activeEffects.filter(e => e.logic === 'double').length;
-              // If we already have 2 "double" mods active (resulting in 4x), more are excess
-              if (doubleCount >= 2) isExcess = true;
-          }
-
-          currentChain.push({ card, index, isExcess });
-
-          // Add to effects logic tracking
-          if (card.type === CardType.EFFECT && card.effectConfig && !isExcess) {
-              // Apply Double Cast Multiplier logic to count
-              let count = card.effectConfig.influenceCount;
-              // Calc how many times this effect repeats based on PREVIOUS doubles
-              let multiplier = 1;
-              activeEffects.forEach(e => { if (e.logic === 'double') multiplier *= 2; });
-              multiplier = Math.min(multiplier, 4);
-
-              // Add this effect to tracking
-              for(let i=0; i<multiplier; i++) {
-                 activeEffects.push({ logic: card.effectConfig.logic, count: count });
-              }
-          }
-          
-          if (card.type === CardType.ARTIFACT) {
-              // Artifact closes the chain
-              chains.push({ cards: currentChain, isComplete: true });
-              currentChain = [];
-              
-              // Decrement effects logic (artifacts consume 1 charge of everything)
-               activeEffects.forEach(eff => {
-                  eff.count--;
-               });
-               activeEffects = activeEffects.filter(eff => eff.count > 0);
-          }
-      });
-
-      // Dangling chain (modifiers without weapon at the end)
-      if (currentChain.length > 0) {
-          chains.push({ cards: currentChain, isComplete: false });
-      }
-
-      return chains;
-  }
-
-  // --- DRAG AND DROP HANDLERS ---
-  const handleDragStart = (e: React.DragEvent, index: number) => {
-      setDraggedIndex(index);
-      e.dataTransfer.effectAllowed = "move";
-      // We pass the index as data
-      e.dataTransfer.setData("text/plain", index.toString());
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-      e.preventDefault(); // Necessary to allow dropping
-      if (draggedIndex === index) return;
-      setDragOverIndex(index);
-  };
-
-  const handleDragOverAppend = (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragOverAppend(true);
-      setDragOverIndex(null); // Clear specific slot target
-  };
-
-  const handleDragLeaveAppend = () => {
-      setIsDragOverAppend(false);
-  };
-
-  const handleDrop = (e: React.DragEvent, targetIndex: number) => {
-      e.preventDefault();
-      const sourceIndexStr = e.dataTransfer.getData("text/plain");
-      const sourceIndex = parseInt(sourceIndexStr);
-
-      if (isNaN(sourceIndex) || sourceIndex === targetIndex) {
-          setDraggedIndex(null);
-          setDragOverIndex(null);
-          return;
-      }
-
-      if (stats) {
-          const newInv = [...stats.inventory];
-          const [movedItem] = newInv.splice(sourceIndex, 1);
-          
-          // Logic: "Insert Before"
-          // If we drag from index 5 to index 2:
-          // Remove 5. Array shrinks. Index 2 is still valid (was 2, now 2). Insert at 2.
-          // If we drag from index 1 to index 4:
-          // Remove 1. Array shrinks. Index 4 becomes 3. We want to insert where 4 WAS.
-          
-          let insertionIndex = targetIndex;
-          if (sourceIndex < targetIndex) {
-              insertionIndex = targetIndex - 1;
-          }
-          
-          newInv.splice(insertionIndex, 0, movedItem);
-          setStats({ ...stats, inventory: newInv });
-      }
-
-      setDraggedIndex(null);
-      setDragOverIndex(null);
-  };
-
-  const handleDropAppend = (e: React.DragEvent) => {
-      e.preventDefault();
-      const sourceIndexStr = e.dataTransfer.getData("text/plain");
-      const sourceIndex = parseInt(sourceIndexStr);
-
-      if (!isNaN(sourceIndex) && stats) {
-          const newInv = [...stats.inventory];
-          const [movedItem] = newInv.splice(sourceIndex, 1);
-          newInv.push(movedItem);
-          setStats({ ...stats, inventory: newInv });
-      }
-
-      setDraggedIndex(null);
-      setDragOverIndex(null);
-      setIsDragOverAppend(false);
-  };
-
-  const handleDragEnd = () => {
-      setDraggedIndex(null);
-      setDragOverIndex(null);
-      setIsDragOverAppend(false);
-  };
-
 
   return (
     <div className="app-container">
-      <style>{`
-        /* Chain Grouping Visuals */
-        .chain-row {
-            display: flex;
-            background: rgba(0,0,0,0.5);
-            border: 1px solid #444;
-            padding: 8px;
-            margin-bottom: 8px;
-            border-radius: 8px;
-            align-items: center;
-            min-height: 80px;
-        }
-        .chain-row.incomplete {
-            border-style: dashed;
-            background: rgba(50,0,0,0.3);
-        }
-        .chain-arrow {
-            color: #666;
-            margin: 0 4px;
-            font-size: 20px;
-        }
-        .inv-slot {
-            margin-right: 8px;
-        }
-        .inv-slot.excess {
-            opacity: 0.4;
-            border-color: #ef4444;
-        }
-        .slot-badge {
-            position: absolute;
-            top: -5px;
-            right: -5px;
-            background: #22d3ee;
-            color: black;
-            font-size: 9px;
-            padding: 1px 4px;
-            border-radius: 4px;
-            font-weight: bold;
-        }
-      `}</style>
       <canvas ref={canvasRef} className="absolute inset-0" />
 
       {/* --- MENU --- */}
@@ -447,66 +354,33 @@ const App = () => {
       {/* --- PAUSE / INVENTORY --- */}
       {gameState === GameState.PAUSED && stats && (
          <div className="absolute inset-0 pause-overlay flex flex-col items-center justify-center z-40">
-           <h2 className="pause-title mb-4">法术链调整</h2>
+           <h2 className="pause-title mb-4">法术链调整 (Grid Layout)</h2>
            <p className="pause-desc mb-4">
-             拖动卡片以重新排序。所有卡片自左向右依次触发，遇到法器则释放法术。<br/>
-             跨行拖动可重组法术链。
+             法术触发顺序：从左到右，从上到下。<br/>
+             请将 Buff 和 Effect 放在核心法器 (ART) 之前。
            </p>
            
-           <div className="pause-layout items-start h-[70vh]">
-               <div className="overflow-y-auto pr-2" style={{ width: '700px', maxHeight: '60vh' }}>
-                 {getChains().map((chain, chainIdx) => (
-                    <div key={chainIdx} className={`chain-row ${!chain.isComplete ? 'incomplete' : ''}`}>
-                        {chain.cards.map((item, i) => (
-                            <React.Fragment key={item.card.id + item.index}>
-                                <div 
-                                    className={`inv-slot flex flex-col items-center justify-center rarity-${item.card.rarity} 
-                                        ${item.isExcess ? 'excess' : ''}
-                                        ${draggedIndex === item.index ? 'is-dragging' : ''}
-                                        ${dragOverIndex === item.index ? 'drop-target-before' : ''}
-                                    `}
-                                    draggable
-                                    onDragStart={(e) => handleDragStart(e, item.index)}
-                                    onDragOver={(e) => handleDragOver(e, item.index)}
-                                    onDrop={(e) => handleDrop(e, item.index)}
-                                    onDragEnd={handleDragEnd}
-                                >
-                                    {item.card.type === CardType.EFFECT && <div className="slot-badge" style={{background: '#d946ef', color: 'white'}}>EF</div>}
-                                    {item.card.type === CardType.BUFF && <div className="slot-badge">BF</div>}
-                                    <span style={{ color: item.card.iconColor, fontWeight: 'bold' }}>{item.card.name.substring(0,2)}</span>
-                                </div>
-                                {/* Draw subtle arrow if not last */}
-                                {i < chain.cards.length - 1 && <span className="chain-arrow">→</span>}
-                            </React.Fragment>
-                        ))}
-                        {!chain.isComplete && <span className="text-gray-500 text-sm ml-4 italic">(缺少核心法器)</span>}
-                    </div>
-                 ))}
-                 
-                 {/* Append Zone (Move to end) */}
-                 {stats.inventory.length > 0 && (
-                     <div 
-                        className={`append-zone ${isDragOverAppend ? 'drag-over' : ''}`}
-                        onDragOver={handleDragOverAppend}
-                        onDragLeave={handleDragLeaveAppend}
-                        onDrop={handleDropAppend}
-                     >
-                        + 拖动至此处移动到末尾 (新建法术链)
-                     </div>
-                 )}
-                 
-                 {/* Placeholder for empty */}
-                 {stats.inventory.length === 0 && <div className="text-gray-500 text-center mt-10">背包为空</div>}
-               </div>
+           <div className="pause-layout">
+               <InventoryGrid 
+                    ref={gridComponentRef} 
+                    items={stats.inventory} 
+                    onHover={setHoveredCard}
+               />
 
-               {/* Details Panel - Shows hovered item info if dragging, or generic info */}
+               {/* Details Panel */}
                <div className="details-panel">
-                   <div className="text-gray-500 italic">
-                        {draggedIndex !== null 
-                            ? "正在移动卡片..." 
-                            : "将鼠标悬停在卡片上查看详情，拖动调整位置。"
-                        }
-                   </div>
+                   {hoveredCard ? (
+                       <>
+                           <div className="details-title" style={{color: hoveredCard.iconColor}}>{hoveredCard.name}</div>
+                           <div className="details-type">{hoveredCard.type} - {hoveredCard.rarity}</div>
+                           <div className="details-desc">{hoveredCard.description}</div>
+                       </>
+                   ) : (
+                       <div className="text-gray-500 italic flex h-full items-center justify-center">
+                            将鼠标悬停在卡片上查看详情。<br/>
+                            拖动卡片以排序。
+                       </div>
+                   )}
                </div>
            </div>
 
