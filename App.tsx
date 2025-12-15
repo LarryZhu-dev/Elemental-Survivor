@@ -1,3 +1,4 @@
+
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { GameEngine } from './engine';
 import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
@@ -107,7 +108,7 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
              {buckets.map((bucketItems, rowIndex) => (
                  <div key={rowIndex}>
                      <div className="spell-row-label">法术组 {rowIndex + 1}</div>
-                     <div className="spell-row" ref={el => { rowRefs.current[rowIndex] = el; }}>
+                     <div className="spell-row" ref={el => rowRefs.current[rowIndex] = el}>
                         {bucketItems.map((card) => (
                             <div key={card.id} className="item" data-id={card.id}>
                                 <div 
@@ -434,11 +435,7 @@ const App = () => {
         <Joystick onMove={handleJoystickMove} />
         
         <button className="pause-btn" onClick={handlePause}>
-             {/* Simple SVG Pause Icon */}
-             <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-                <rect x="6" y="4" width="4" height="16" />
-                <rect x="14" y="4" width="4" height="16" />
-             </svg>
+            PAUSE
         </button>
         </>
       )}
@@ -463,7 +460,7 @@ const App = () => {
                         onHover={setHoveredCard}
                         rowCount={rowCount}
                       />
-                      <button onClick={handleAddRow} className="btn-add-group">
+                      <button onClick={handleAddRow} className="mt-4 px-3 py-1 bg-gray-700 text-sm text-gray-300 rounded hover:bg-gray-600 border border-gray-500">
                          + 添加法术组
                       </button>
                   </div>
@@ -505,33 +502,24 @@ const App = () => {
               
               {/* GM Mode Tools */}
               {isGmMode && (
-                  <div className="gm-panel">
-                      <div className="gm-header">GM TOOLS</div>
-                      <div className="gm-section">
-                        <div className="gm-label">Set Wave:</div>
-                        <input type="number" onChange={gmSetWave} className="text-black w-full"/>
+                  <div className="absolute top-4 left-4 p-4 bg-black/80 rounded border border-red-500 z-50">
+                      <div className="text-red-500 font-bold mb-2">GM TOOLS</div>
+                      <div>Set Wave: <input type="number" onChange={gmSetWave} className="text-black w-16"/></div>
+                      <div className="mt-2 text-xs">Available Cards:</div>
+                      <div className="flex flex-wrap gap-1 max-w-sm h-32 overflow-auto">
+                          {ALL_CARDS.map(c => (
+                              <button key={c.id} onClick={() => selectCardForInventory(c)} className="text-xs bg-gray-700 px-1 rounded">
+                                  {c.name}
+                              </button>
+                          ))}
                       </div>
-                      
-                      <div className="gm-section">
-                          <div className="gm-label">Available Cards:</div>
-                          <div className="gm-card-grid">
-                              {ALL_CARDS.map(c => (
-                                  <button key={c.id} onClick={() => selectCardForInventory(c)} className="gm-card-btn">
-                                      {c.name}
-                                  </button>
-                              ))}
-                          </div>
-                      </div>
-                      
-                      <div className="gm-section">
-                          <div className="gm-label">Current Inventory:</div>
-                          <div className="gm-card-grid">
-                               {stats?.inventory.map((c, i) => (
-                                   <button key={i} onClick={() => gmRemoveCard(i)} className="gm-card-btn" style={{backgroundColor: '#7f1d1d', borderColor: '#ef4444'}}>
-                                       X {c.name}
-                                   </button>
-                               ))}
-                          </div>
+                      <div className="mt-2 text-xs">Inventory:</div>
+                      <div className="flex flex-wrap gap-1 max-w-sm h-32 overflow-auto">
+                           {stats?.inventory.map((c, i) => (
+                               <button key={i} onClick={() => gmRemoveCard(i)} className="text-xs bg-red-900 px-1 rounded">
+                                   X {c.name}
+                               </button>
+                           ))}
                       </div>
                   </div>
               )}

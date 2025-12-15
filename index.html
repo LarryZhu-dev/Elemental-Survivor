@@ -97,27 +97,6 @@
       .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; border-width: 2px; }
       .btn-red { background-color: #991b1b; border-color: #ef4444; }
       .btn-red:hover { background-color: #b91c1c; }
-
-      /* Add Spell Group Button */
-      .btn-add-group {
-        width: 100%;
-        margin-top: 1rem;
-        padding: 0.75rem;
-        background-color: #1e293b;
-        border: 2px dashed #475569;
-        color: #94a3b8;
-        font-family: inherit;
-        font-weight: bold;
-        cursor: pointer;
-        transition: all 0.2s;
-        text-transform: uppercase;
-        font-size: 0.875rem;
-      }
-      .btn-add-group:hover {
-        background-color: #334155;
-        border-color: #94a3b8;
-        color: white;
-      }
       
       .instructions {
         color: #9ca3af; /* gray-400 */
@@ -232,12 +211,10 @@
         display: flex;
         align-items: center;
         justify-content: center;
+        font-size: 1.25rem;
         cursor: pointer;
         z-index: 50;
         pointer-events: auto;
-      }
-      .pause-btn:hover {
-        background-color: rgba(255,255,255,0.2);
       }
 
       /* Boss Warning */
@@ -579,10 +556,10 @@
 
       /* GM Debug Panel */
       .gm-panel {
-        position: fixed; /* Fixed to stay on screen even if scrolled */
+        position: absolute;
         top: 2rem;
         left: 2rem;
-        width: 300px;
+        width: 600px;
         max-height: 80vh;
         background-color: rgba(0, 0, 0, 0.95);
         border: 2px solid #a855f7;
@@ -592,10 +569,9 @@
         flex-direction: column;
         overflow-y: auto;
         box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
-        z-index: 200; /* Ensure it is above almost everything */
       }
       @media (max-width: 600px) {
-          .gm-panel { width: 90vw; left: 5vw; top: 1rem; }
+          .gm-panel { width: 95vw; left: 2.5vw; top: 1rem; }
       }
       .gm-header {
         font-size: 1.25rem;
@@ -626,7 +602,7 @@
         padding: 0.25rem 0.5rem;
         cursor: pointer;
         text-align: left;
-        width: 100%;
+        width: 140px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
