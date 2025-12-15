@@ -104,9 +104,7 @@ interface FloatingText {
 interface TemporaryEffect {
     container: Graphics;
     life: number;
-    maxLife: number; // Added for lerp
-    type?: 'storm'; // Type for special rendering
-    onUpdate: (g: Graphics, life: number, maxLife: number) => void;
+    onUpdate: (g: Graphics, life: number) => void;
 }
 
 interface DelayedAction {
@@ -217,7 +215,7 @@ export class GameEngine {
             canvas: this.canvas,
             width: SCREEN_WIDTH,
             height: SCREEN_HEIGHT,
-            backgroundColor: 0x0f172a, // Matches CSS
+            backgroundColor: 0x1a1a2e,
             antialias: false,
             resolution: Math.min(window.devicePixelRatio, 2), 
         });
@@ -415,8 +413,7 @@ export class GameEngine {
         this.tempEffects.push({
             container: marker,
             life: 15,
-            maxLife: 15,
-            onUpdate: (g, l, ml) => { g.alpha = l / ml; }
+            onUpdate: (g, l) => { g.alpha = l / 15; }
         });
     }
 
@@ -625,401 +622,293 @@ export class GameEngine {
 
         // 2. Size Scaling: Exponential growth with wave
         // Base size + (wave * factor)
-        const sizeFactor = 1 + Math.min(2, this.wave * 0.05); 
+        const sizeFactor = 1 + Math.min(this.wave * 0.05, 1);
         
-        let color = 0x88cc88;
-        let speed = 2;
-        let hp = 10 + (this.wave * 2); 
-        let radius = 10;
-        let xpValue = 1;
+        let color = 0x888888;
+        let speed = 1.5;
+        let hp = 10 + this.wave * 5;
+        let dmg = 5 + this.wave;
+        let size = 10;
+        let xp = 1;
 
-        switch(type) {
-            case 'slime':
-                g.circle(0,0,10).fill(color);
-                speed = 1.5 + Math.random();
-                break;
-            case 'bat':
-                color = 0x5555ff;
-                g.moveTo(-10, 0).lineTo(0, 5).lineTo(10, 0).lineTo(0, -5).fill(color);
-                speed = 3 + Math.random();
-                hp *= 0.8;
-                xpValue = 2;
-                radius = 8;
-                break;
-            case 'skull':
-                color = 0xcccccc;
-                g.rect(-8, -8, 16, 16).fill(color);
-                g.rect(-3, 2, 2, 4).fill(0x000000); // eye
-                g.rect(1, 2, 2, 4).fill(0x000000); // eye
-                speed = 1 + Math.random() * 0.5;
-                hp *= 2.5;
-                xpValue = 5;
-                radius = 12;
-                break;
-            case 'eye':
-                color = 0xff5555;
-                g.circle(0,0,14).fill(color);
-                g.circle(0,0,6).fill(0xffff00); // pupil
-                speed = 2.5;
-                hp *= 1.5;
-                xpValue = 8;
-                radius = 14;
-                break;
+        if (type === 'slime') {
+            color = 0x00ff00; size = 12; speed = 1.2;
+        } else if (type === 'bat') {
+            color = 0x5555ff; size = 8; speed = 2.5; hp *= 0.6;
+        } else if (type === 'skull') {
+            color = 0xdddddd; size = 14; speed = 1.0; hp *= 2.0; xp = 5;
+        } else if (type === 'eye') {
+            color = 0xff00ff; size = 12; speed = 1.8; hp *= 1.5; dmg *= 1.5; xp = 3;
         }
+
+        // Apply size factor
+        size *= sizeFactor;
+        
+        g.rect(-size, -size, size*2, size*2).fill(color);
+        // Simple eyes
+        g.rect(-size/2, -size/2, 4, 4).fill(0x000000);
+        g.rect(size/4, -size/2, 4, 4).fill(0x000000);
 
         cont.addChild(g);
         cont.x = x;
         cont.y = y;
-        cont.baseScale = sizeFactor;
-        cont.scale.set(sizeFactor);
-        
-        cont.hp = hp * sizeFactor;
-        cont.maxHp = cont.hp;
-        cont.radius = radius * sizeFactor;
+        cont.hp = hp;
+        cont.maxHp = hp;
         cont.isDead = false;
         cont.vx = 0; cont.vy = 0;
         cont.knockbackVx = 0; cont.knockbackVy = 0;
+        cont.radius = size;
         cont.enemyType = type;
         cont.animOffset = Math.random() * 100;
-        cont.isBoss = false;
+        cont.baseScale = 1;
+        cont.hitFlashTimer = 0;
 
+        // Status
         cont.isBurning = false; cont.burnTimer = 0;
         cont.isWet = false; cont.wetTimer = 0;
         cont.isElectrified = false;
         cont.hitByLightningYellow = 0;
         cont.hitByLightningBlue = 0;
-        cont.hitFlashTimer = 0;
 
         this.enemies.push(cont);
         this.world.addChild(cont);
     }
 
     handleWeapons(delta: number) {
-        // Build the spell chain from inventory
-        let activeArtifact: CardDef | null = null;
-        let modifiers: ActiveEffect[] = [];
-        let statBuffs = { frequency: 1, range: 1, speed: 1, damage: 1 };
+        // Iterate over persistent bullets that are "weapons" (orbitals, minions)
+        // OR trigger artifact cooldowns from stats.inventory
         
-        // We only process weapons if we have them. 
-        // In the inventory array, we execute logically sequentially but they operate in parallel timelines (cooldowns are per artifact).
-        // However, modifiers apply to the NEXT artifact in the chain.
+        // We need a way to map inventory items to their runtime state.
+        // For this simple engine, we iterate stats.inventory and check/decrement cooldowns.
+        // However, we need to store the cooldown timer SOMEWHERE. 
+        // We'll attach it to the CardDef object in memory is risky if React re-creates it?
+        // Actually stats.inventory is the source of truth. We can mutate it for cooldowns in this engine scope?
+        // No, let's keep a parallel Map of cooldowns.
         
-        for (let i = 0; i < this.stats.inventory.length; i++) {
-            const card = this.stats.inventory[i];
-            
-            if (card.type === CardType.EFFECT) {
-                if (card.effectConfig) {
-                    modifiers.push({ 
-                        logic: card.effectConfig.logic, 
-                        count: card.effectConfig.influenceCount 
-                    });
-                }
-            } else if (card.type === CardType.BUFF) {
-                if (card.buffConfig) {
-                    if (card.buffConfig.frequency) statBuffs.frequency += card.buffConfig.frequency;
-                    if (card.buffConfig.range) statBuffs.range += card.buffConfig.range;
-                    if (card.buffConfig.speed) statBuffs.speed += card.buffConfig.speed;
-                }
-            } else if (card.type === CardType.ARTIFACT) {
-                // Found an artifact, trigger it using accumulated modifiers
-                this.updateArtifact(card, modifiers, statBuffs, delta);
+        // Hack: We will attach a runtime property to the card object itself in this memory space.
+        // In a strict redux/react world this is bad, but for a game loop it's fine.
+        
+        this.stats.inventory.forEach((card: any, index) => {
+            if (card.type !== CardType.ARTIFACT) return;
+
+            // Initialize runtime props if missing
+            if (typeof card._cooldownTimer === 'undefined') {
+                card._cooldownTimer = 0;
+                // Accumulate modifiers from Buffs/Effects in the chain BEFORE this card
+                // For now, let's just trigger it.
+            }
+
+            if (card._cooldownTimer > 0) {
+                card._cooldownTimer -= delta;
+            } else {
+                // FIRE!
+                this.fireWeapon(card, index);
                 
-                // Reset modifiers for next artifact
-                modifiers = []; 
-                statBuffs = { frequency: 1, range: 1, speed: 1, damage: 1 };
+                // Reset Cooldown
+                // Find buffs before this card in the specific chain logic?
+                // For MVP, just use base config.
+                let cd = card.artifactConfig.cooldown;
+                // Apply global speed
+                // ...
+                card._cooldownTimer = cd;
             }
-        }
+        });
     }
 
-    updateArtifact(card: CardDef, modifiers: ActiveEffect[], buffs: any, delta: number) {
-        if (!card.artifactConfig) return;
+    // Evaluate the card chain to get modifiers
+    getModifiersForCard(index: number) {
+        // Look backwards from index-1 until we hit another Artifact or start of array
+        // Collect buffs and effects.
         
-        const config = card.artifactConfig;
+        const mods = {
+            damageMult: 1,
+            speedMult: 1,
+            rangeMult: 1,
+            countAdd: 0,
+            effects: [] as ActiveEffect[]
+        };
         
-        // Use a persistent store for cooldowns on the card object itself (runtime hack)
-        const runtime = card as any;
-        if (!runtime.cooldownTimer) runtime.cooldownTimer = 0;
-        
-        // Apply Buffs
-        const finalCooldown = Math.max(5, config.cooldown / buffs.frequency);
-        
-        runtime.cooldownTimer -= delta;
-        
-        if (runtime.cooldownTimer <= 0) {
-            // Find Target
-            const target = this.getNearestEnemy(this.player.x, this.player.y, 400 * buffs.range);
+        // Also apply global stats
+        mods.damageMult *= this.stats.damageMultiplier;
+
+        for (let i = index - 1; i >= 0; i--) {
+            const c = this.stats.inventory[i];
+            if (c.type === CardType.ARTIFACT) break; // Stop at previous weapon
             
-            // Fire!
-            // Handle Multi-cast (Double effect)
-            let castCount = 1;
-            const doubleMod = modifiers.find(m => m.logic === 'double');
-            if (doubleMod) castCount += doubleMod.count;
-
-            for(let c=0; c<castCount; c++) {
-                 // Add small delay for multi-cast
-                 if (c > 0) {
-                     this.delayedActions.push({
-                         timer: c * 5,
-                         action: () => this.fireWeapon(card, modifiers, buffs, target)
-                     });
-                 } else {
-                     this.fireWeapon(card, modifiers, buffs, target);
-                 }
+            if (c.type === CardType.STAT) {
+                // Stat cards work globally usually, but if placed in chain? 
+                // Let's assume Stat cards are global and handled in base stats.
             }
+            if (c.type === CardType.BUFF) {
+                if (c.buffConfig?.frequency) mods.speedMult += c.buffConfig.frequency;
+                if (c.buffConfig?.range) mods.rangeMult += c.buffConfig.range;
+            }
+            if (c.type === CardType.EFFECT) {
+                mods.effects.push({ 
+                    logic: c.effectConfig!.logic, 
+                    count: c.effectConfig!.influenceCount 
+                });
+            }
+        }
+        return mods;
+    }
 
-            runtime.cooldownTimer = finalCooldown;
+    fireWeapon(card: CardDef, index: number) {
+        const mods = this.getModifiersForCard(index);
+        const config = card.artifactConfig!;
+
+        // Base Target logic
+        let target: Entity | null = null;
+        if (this.isAutoAim && this.enemies.length > 0) {
+            // Find closest
+            let minDist = 99999;
+            this.enemies.forEach(e => {
+                const dx = e.x - this.player.x;
+                const dy = e.y - this.player.y;
+                const d = dx*dx + dy*dy;
+                if (d < minDist) {
+                    minDist = d;
+                    target = e;
+                }
+            });
+        }
+
+        // Logic Processor
+        // Determine projectile count, pattern, etc based on mods.effects
+        let count = 1;
+        let pattern = 'single';
+        
+        mods.effects.forEach(e => {
+            if (e.logic === 'double') count += e.count; // "Double Cast" adds +1/+2 reps
+            if (e.logic === 'fan') { count += 2 + e.count; pattern = 'fan'; }
+            if (e.logic === 'split_back') { pattern = 'front_back'; }
+        });
+
+        // Fire loop
+        for(let i=0; i<count; i++) {
+             // Delay burst slightly for "Double Cast" feel? Or all at once?
+             // Let's do a slight delay if count > 1 to prevent overlapping
+             if (i > 0) {
+                 this.delayedActions.push({
+                     timer: i * 5,
+                     action: () => this.spawnBullet(card, mods, target, pattern, i, count)
+                 });
+             } else {
+                 this.spawnBullet(card, mods, target, pattern, i, count);
+             }
         }
     }
 
-    fireWeapon(card: CardDef, modifiers: ActiveEffect[], buffs: any, target: Entity | null) {
-        if (!card.artifactConfig) return;
-        const config = card.artifactConfig;
-
-        const baseDmg = config.baseDamage * this.stats.damageMultiplier * buffs.damage;
+    spawnBullet(card: CardDef, mods: any, target: Entity | null, pattern: string, index: number, total: number) {
+        const config = card.artifactConfig!;
+        const g = new Graphics();
         
-        // Modifiers Logic
-        const fan = modifiers.find(m => m.logic === 'fan');
-        const splitBack = modifiers.find(m => m.logic === 'split_back');
-        const ring = modifiers.find(m => m.logic === 'ring');
-        const wobble = modifiers.find(m => m.logic === 'wobble');
-        const giant = modifiers.find(m => m.logic === 'giant');
-        const track = modifiers.find(m => m.logic === 'track');
+        const cont = new Container() as Bullet;
+        cont.addChild(g);
+        
+        cont.x = this.player.x;
+        cont.y = this.player.y;
+        cont.ownerId = card.id;
+        cont.damage = config.baseDamage * mods.damageMult;
+        cont.element = config.element;
+        cont.color = config.color; // Required for visual logic
+        cont.duration = 60 * (mods.rangeMult || 1); 
+        cont.maxDuration = cont.duration;
+        cont.isDead = false;
+        cont.hitList = new Set();
+        cont.pierce = 0;
+        cont.radius = 5;
+        cont.trailTimer = 0;
+        
+        // Mods
+        cont.isTracking = mods.effects.some((e:any) => e.logic === 'track');
+        cont.isWobble = mods.effects.some((e:any) => e.logic === 'wobble');
+        cont.giantCount = 0;
+        mods.effects.forEach((e:any) => { if(e.logic === 'giant') cont.giantCount += e.count; });
+        
+        if (cont.giantCount > 0) {
+            cont.scale.set(1 + cont.giantCount * 0.5);
+            cont.damage *= (1 + cont.giantCount * 0.5);
+        }
 
-        const giantCount = giant ? giant.count : 0;
-        const scale = 1 + (giantCount * 0.5);
-
-        // Calculate Direction
+        // Velocity Calc
+        let speed = 6;
         let angle = 0;
+
         if (target) {
             angle = Math.atan2(target.y - this.player.y, target.x - this.player.x);
         } else {
-            // Random or movement direction
+            // Default to moving direction or random
             if (this.joystickInput.x !== 0 || this.joystickInput.y !== 0) {
-                angle = Math.atan2(this.joystickInput.y, this.joystickInput.x);
+                 angle = Math.atan2(this.joystickInput.y, this.joystickInput.x);
             } else {
-                angle = Math.random() * Math.PI * 2;
+                 angle = Math.random() * Math.PI * 2;
             }
         }
 
-        // Projectiles count
-        let projectiles = 1;
-        let arc = 0;
+        // Pattern mods
+        if (pattern === 'fan') {
+            const spread = Math.PI / 4;
+            const step = spread / (total - 1 || 1);
+            angle += -spread/2 + step * index;
+        } else if (pattern === 'front_back') {
+            if (index % 2 === 1) angle += Math.PI;
+        }
+
+        cont.vx = Math.cos(angle) * speed;
+        cont.vy = Math.sin(angle) * speed;
         
-        if (fan) {
-            projectiles += 2 + fan.count; // Silver=3 total, Gold=4 total, Prism=5
-            arc = Math.PI / 3;
+        // Type Specific Rendering & Logic
+        if (config.projectileType === 'projectile') {
+            g.circle(0, 0, 5).fill(config.color);
+        } 
+        else if (config.projectileType === 'lightning') {
+            // Instant hit usually, or a fast projectile?
+            // Let's make it a fast projectile that looks jagged
+            speed = 15;
+            cont.vx = Math.cos(angle) * speed;
+            cont.vy = Math.sin(angle) * speed;
+            cont.pierce = 3;
+            cont.duration = 20;
+            // Graphic is drawn in update loop for jaggedness
         }
-        if (ring) {
-            projectiles = 8 + ring.count * 2;
-            arc = Math.PI * 2;
-        }
-
-        const startAngle = angle - arc/2;
-        const step = projectiles > 1 ? arc / (projectiles - 1) : 0;
-
-        // Extra backwards shots
-        const backShots = splitBack ? splitBack.count : 0;
-
-        // Fire Function
-        const spawnBullet = (a: number) => {
-             const b = new Container() as Bullet;
-             const g = new Graphics();
-
-             // Visuals based on config
-             b.color = config.color; // CRITICAL: Save color to bullet for logic
-             
-             // --- Updated Projectile Drawing ---
-             if (config.projectileType === 'lightning') {
-                 // Lightning is handled in updateBullets for animation, but we need a base hit area
-                 g.circle(0,0,15 * scale).fill({ color: 0xffffff, alpha: 0.01 }); // invisible hitbox
-                 // We will draw the bolt dynamically
-             }
-             else if (config.projectileType === 'water_snake') {
-                 g.circle(0,0, 10 * scale).fill(config.color);
-             }
-             else if (config.projectileType === 'area') {
-                 // Initial burst visual
-                 g.circle(0,0, 40 * scale * buffs.range).stroke({ width: 2, color: config.color });
-                 g.circle(0,0, 40 * scale * buffs.range).fill({ color: config.color, alpha: 0.2 });
-             } 
-             else {
-                 // Standard
-                 g.circle(0,0, 6 * scale).fill(config.color);
-                 g.circle(0,0, 4 * scale).fill(0xffffff); // core
-             }
-
-             b.addChild(g);
-             b.x = this.player.x;
-             b.y = this.player.y;
-             b.vx = Math.cos(a) * 5 * buffs.speed;
-             b.vy = Math.sin(a) * 5 * buffs.speed;
-             b.damage = baseDmg;
-             b.element = config.element;
-             b.duration = 60 * buffs.range; // Range affects duration for projectiles
-             b.maxDuration = b.duration;
-             b.radius = 10 * scale;
-             if (config.projectileType === 'area') b.radius = 40 * scale * buffs.range;
-             
-             b.ownerId = card.id;
-             b.isDead = false;
-             b.pierce = 1;
-             if (config.projectileType === 'area' || config.projectileType === 'beam' || config.projectileType === 'lightning') b.pierce = 999;
-             if (giant) b.pierce += 2;
-
-             b.hitList = new Set();
-             b.trailTimer = 0;
-             b.color = config.color; // Save tracking color
-             
-             // Logic Flags
-             b.isTracking = !!track;
-             b.isWobble = !!wobble;
-             b.wobblePhase = 0;
-             b.giantCount = giantCount;
-             
-             // Type Specific Init
-             if (config.projectileType === 'lightning') {
-                 b.duration = 15; // Short life for lightning visual
-                 b.pierce = 999;
-                 // Lightning doesn't move conventionally
-                 b.vx = 0; b.vy = 0;
-                 // Find chain targets? Simplified: hits area line
-                 // For now, let's make it a "Bolt" that hits the target instantly or travels super fast
-                 b.vx = Math.cos(a) * 20;
-                 b.vy = Math.sin(a) * 20;
-             }
-
-             this.bullets.push(b);
-             this.world.addChild(b);
-        };
-
-        // Main Volley
-        if (ring) {
-             for(let j=0; j<projectiles; j++) {
-                 spawnBullet(angle + (j * (Math.PI*2/projectiles)));
-             }
-        } else {
-             for(let j=0; j<projectiles; j++) {
-                 spawnBullet(startAngle + (j * step));
-             }
-        }
-
-        // Backwards Volley
-        if (backShots > 0) {
-            for(let k=0; k<backShots; k++) {
-                spawnBullet(angle + Math.PI + (Math.random()-0.5)*0.5);
-            }
-        }
-    }
-
-    getNearestEnemy(x: number, y: number, range: number): Entity | null {
-        let nearest: Entity | null = null;
-        let minD = range * range;
-        
-        for (const e of this.enemies) {
-            if (e.isDead) continue;
-            const d = (e.x - x)**2 + (e.y - y)**2;
-            if (d < minD) {
-                minD = d;
-                nearest = e;
-            }
-        }
-        return nearest;
-    }
-
-    updateEnemies(delta: number) {
-        const px = this.player.x;
-        const py = this.player.y;
-
-        for (const e of this.enemies) {
-            if (e.isDead) continue;
-
-            // Behavior
-            let dx = px - e.x;
-            let dy = py - e.y;
-            const dist = Math.sqrt(dx*dx + dy*dy);
+        else if (config.projectileType === 'area') {
+            cont.vx = 0; cont.vy = 0;
+            cont.duration = 30; // Short burst
+            cont.radius = 60 * (mods.rangeMult || 1);
+            cont.pierce = 999;
             
-            // Normalize
-            if (dist > 0) {
-                dx /= dist;
-                dy /= dist;
-            }
-
-            // Move
-            let spd = 0.5; // Base speed
-            // If knockback
-            if (Math.abs(e.knockbackVx) > 0.1 || Math.abs(e.knockbackVy) > 0.1) {
-                e.x += e.knockbackVx * delta;
-                e.y += e.knockbackVy * delta;
-                e.knockbackVx *= 0.9;
-                e.knockbackVy *= 0.9;
+            // Fire Gourd Area
+            if (config.element === ElementType.FIRE) {
+                g.circle(0,0, cont.radius).fill({ color: config.color, alpha: 0.3 });
+                cont.firePhase = 0;
             } else {
-                // Normal move
-                e.x += dx * spd * delta;
-                e.y += dy * spd * delta;
-                
-                // Avoidance (soft collision between enemies)
-                // Performance heavy, skip for now or simple check
-            }
-
-            // Visuals
-            e.animOffset += delta * 0.1;
-            const bounce = Math.sin(e.animOffset) * 5;
-            e.getChildAt(0).y = bounce;
-
-            // Status Effects
-            if (e.hitFlashTimer > 0) {
-                e.hitFlashTimer -= delta;
-                e.tint = 0xffffff;
-            } else {
-                e.tint = 0xffffff; // Reset
-                if (e.hitByLightningYellow > 0) e.tint = 0xffffaa;
-                if (e.hitByLightningBlue > 0) e.tint = 0xaaaaFF;
-            }
-
-            // Decrease Status Timers
-            if (e.hitByLightningYellow > 0) e.hitByLightningYellow -= delta;
-            if (e.hitByLightningBlue > 0) e.hitByLightningBlue -= delta;
-
-            // Boss Logic
-            if (e.isBoss) {
-                if (e.bossActionTimer && e.bossActionTimer > 0) {
-                    e.bossActionTimer -= delta;
-                } else {
-                    // Boss Attack
-                    // Spawn simple bullets
-                    for(let i=0; i<8; i++) {
-                        const a = (Math.PI*2/8)*i + e.animOffset;
-                        const b = new Container() as Bullet;
-                        const bg = new Graphics();
-                        bg.circle(0,0,5).fill(0xff0000);
-                        b.addChild(bg);
-                        b.x = e.x; b.y = e.y;
-                        b.vx = Math.cos(a)*3; b.vy = Math.sin(a)*3;
-                        b.damage = 10;
-                        b.element = ElementType.VOID;
-                        b.duration = 200;
-                        b.maxDuration = 200;
-                        b.radius = 5;
-                        b.ownerId = 'boss';
-                        b.isDead = false;
-                        b.pierce = 1;
-                        b.hitList = new Set();
-                        b.color = 0xff0000;
-                        b.trailTimer = 0;
-                        b.giantCount = 0;
-                        // Add to Enemy Bullets list? 
-                        // For simplicity, we don't have enemy bullets hitting player yet in this simplified engine
-                        // Just collision damage.
-                    }
-                    e.bossActionTimer = 180;
-                }
+                g.circle(0,0, cont.radius).fill({ color: config.color, alpha: 0.2 });
             }
         }
+        else if (config.projectileType === 'orbit') {
+            // Implement orbit logic in update
+        }
+        else if (config.projectileType === 'water_snake') {
+             // Complex snake
+             cont.snakeTimer = 0;
+             cont.pierce = 99;
+             cont.duration = 120;
+        }
+        
+        this.bullets.push(cont);
+        this.world.addChild(cont);
     }
 
     updateBullets(delta: number) {
-        for (const b of this.bullets) {
-            if (b.isDead) continue;
+        for (let i = this.bullets.length - 1; i >= 0; i--) {
+            const b = this.bullets[i];
+            
+            if (b.isDead) {
+                b.destroy();
+                this.bullets.splice(i, 1);
+                continue;
+            }
 
             b.duration -= delta;
             if (b.duration <= 0) {
@@ -1027,67 +916,353 @@ export class GameEngine {
                 continue;
             }
 
-            // Movement Logic
+            // Movement
             if (b.isWobble) {
-                b.wobblePhase = (b.wobblePhase || 0) + 0.2 * delta;
-                const perpX = -b.vy;
-                const perpY = b.vx;
-                const mag = Math.sin(b.wobblePhase) * 2;
-                b.x += b.vx * delta + perpX * mag * 0.1;
-                b.y += b.vy * delta + perpY * mag * 0.1;
-            } 
-            else if (b.isTracking && !b.target) {
-                // Find target if none
-                b.target = this.getNearestEnemy(b.x, b.y, 300);
+                b.wobblePhase = (b.wobblePhase || 0) + 0.2;
+                b.x += b.vx + Math.sin(b.wobblePhase) * 2;
+                b.y += b.vy + Math.cos(b.wobblePhase) * 2;
+            } else {
                 b.x += b.vx * delta;
                 b.y += b.vy * delta;
             }
-            else if (b.isTracking && b.target && !b.target.isDead) {
-                // Homing
-                const dx = b.target.x - b.x;
-                const dy = b.target.y - b.y;
-                const angle = Math.atan2(dy, dx);
+            
+            // Tracking
+            if (b.isTracking && !b.target && this.enemies.length > 0) {
+                 // Find new target
+                 b.target = this.enemies[Math.floor(Math.random() * this.enemies.length)];
+            }
+            if (b.isTracking && b.target && !b.target.isDead) {
+                const angle = Math.atan2(b.target.y - b.y, b.target.x - b.x);
                 // Steer
+                const steer = 0.1;
                 const currentAngle = Math.atan2(b.vy, b.vx);
-                // Simple lerp angle?
-                b.vx = Math.cos(angle) * 5; // simplified
-                b.vy = Math.sin(angle) * 5;
-                b.x += b.vx * delta;
-                b.y += b.vy * delta;
-            }
-            else {
-                b.x += b.vx * delta;
-                b.y += b.vy * delta;
+                // Simple lerp angle? A bit complex for simple atan2, just adjusting velocity
+                b.vx = b.vx * 0.9 + Math.cos(angle) * 2 * 0.1;
+                b.vy = b.vy * 0.9 + Math.sin(angle) * 2 * 0.1;
             }
 
-            // Visual Updates (Trails, etc)
-            b.trailTimer += delta;
-            if (b.trailTimer > 3) {
-                this.spawnParticle(b.x, b.y, b.color, 0.5, true);
-                b.trailTimer = 0;
-            }
-
-            // Special Renderer for Lightning
-            // We want the lightning to look like a zigzag from origin to current point, or just chaotic
+            // Visual Updates
+            const g = b.children[0] as Graphics;
+            
             if (b.element === ElementType.LIGHTNING || b.element === ElementType.LIGHTNING_BLUE) {
-                const g = b.getChildAt(0) as Graphics;
                 g.clear();
+                // Draw jagged line
                 g.moveTo(0,0);
+                // The bolt is a projectile, so we draw a trail behind it
+                g.lineTo(-b.vx*2, -b.vy*2);
+                g.stroke({ width: 3, color: b.color }); // FORCE COLOR HERE
                 
-                // Draw a zigzag tail behind movement
-                const tailLen = 30;
-                // Randomized points
-                g.lineTo(-b.vx * 2 + (Math.random()-0.5)*10, -b.vy * 2 + (Math.random()-0.5)*10);
-                g.lineTo(-b.vx * 4, -b.vy * 4);
-                
-                // Use the configured bullet color!
-                g.stroke({ width: 2 + b.giantCount, color: b.color });
+                // Add sparks
+                if (Math.random() < 0.5) {
+                    this.spawnParticle(b.x, b.y, b.color, 0.5);
+                }
+            }
+            else if (b.element === ElementType.FIRE) {
+                // Pulse size
+                if (b.firePhase !== undefined) {
+                    b.firePhase += 0.1;
+                    const r = b.radius + Math.sin(b.firePhase) * 5;
+                    g.clear();
+                    g.circle(0,0, r).fill({ color: b.color, alpha: 0.4 }); // Use b.color
+                }
+            }
+            else if (b.element === ElementType.WATER) {
+                // Snake visuals
+                // ...
             }
         }
     }
 
+    updateEnemies(delta: number) {
+        // Optimization: spatial hashing could go here
+        
+        for (let i = this.enemies.length - 1; i >= 0; i--) {
+            const e = this.enemies[i];
+            
+            // Move towards player
+            const dx = this.player.x - e.x;
+            const dy = this.player.y - e.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (dist > 0) {
+                e.vx = (dx / dist) * 1; // base speed
+                e.vy = (dy / dist) * 1;
+            }
+            
+            // Apply Knockback decay
+            e.x += (e.vx + e.knockbackVx) * delta;
+            e.y += (e.vy + e.knockbackVy) * delta;
+            e.knockbackVx *= 0.9;
+            e.knockbackVy *= 0.9;
+            
+            // Flip sprite
+            const g = e.children[0];
+            if (e.vx > 0) g.scale.x = 1; 
+            else g.scale.x = -1;
+
+            // Flash
+            if (e.hitFlashTimer > 0) {
+                e.hitFlashTimer -= delta;
+                e.tint = 0xffffff; // White flash
+            } else {
+                e.tint = 0xFFFFFF; // Reset (Pixi default is white multiplier)
+                // If we want original colors, we rely on Graphics fill. 
+                // Setting tint to 0xFF0000 overlays red.
+                // Resetting to 0xFFFFFF restores original graphics colors.
+            }
+            
+            // Timers
+            if (e.hitByLightningYellow > 0) e.hitByLightningYellow -= delta;
+            if (e.hitByLightningBlue > 0) e.hitByLightningBlue -= delta;
+
+            // Animation (Bounce)
+            e.animOffset += delta * 0.2;
+            g.y = Math.sin(e.animOffset) * 3;
+
+            // Player Collision (Damage)
+            if (dist < e.radius + this.player.radius) {
+                if (this.player.invulnTimer <= 0) {
+                    this.player.hp -= 10; // Fixed dmg for now
+                    this.player.invulnTimer = 30;
+                    this.spawnText("-10", this.player.x, this.player.y, 0xff0000);
+                    // Shake
+                    // ...
+                    if (this.player.hp <= 0) {
+                        this.onGameStateChange(GameState.GAME_OVER);
+                    }
+                }
+            }
+        }
+    }
+
+    handleCollisions(delta: number) {
+        // Bullet vs Enemy
+        for (const b of this.bullets) {
+            // Optimization: check bounds first
+            
+            for (const e of this.enemies) {
+                if (b.isDead) break;
+                if (b.hitList.has(e.uid)) continue; // Already hit this frame/pierce? 
+                // Actually unique ID logic needed for set. Pixi containers have unique IDs? 
+                // e.uid doesn't exist on Container by default, we use object ref or add id.
+                // Let's rely on simple distance for now and manage hitList by internal ID if needed.
+                // For this demo, let's just use object reference in Set (JS Set supports objects)
+                // But `uid` is safer if we destroy objects.
+                
+                const dx = b.x - e.x;
+                const dy = b.y - e.y;
+                const distSq = dx*dx + dy*dy;
+                const r = b.radius + e.radius;
+                
+                if (distSq < r*r) {
+                    // HIT
+                    e.hp -= b.damage;
+                    e.knockbackVx = (b.vx || 0) * 2;
+                    e.knockbackVy = (b.vy || 0) * 2;
+                    e.hitFlashTimer = 5;
+                    
+                    this.spawnDamageText(Math.floor(b.damage), e.x, e.y, b.element === ElementType.FIRE ? 0xff4500 : 0xffffff);
+
+                    // --- Elemental & Synergy Logic ---
+                    if (b.element === ElementType.LIGHTNING) {
+                        e.hitByLightningYellow = 10; // 0.16s window
+                    } else if (b.element === ElementType.LIGHTNING_BLUE) {
+                        e.hitByLightningBlue = 10;
+                    }
+
+                    // CHECK SYNERGY: Thunderstorm
+                    if (e.hitByLightningYellow > 0 && e.hitByLightningBlue > 0) {
+                        // TRIGGER THUNDERSTORM
+                        this.triggerThunderstorm(e.x, e.y);
+                        e.hitByLightningYellow = 0; // Consume marks
+                        e.hitByLightningBlue = 0;
+                    }
+
+                    if (e.hp <= 0 && !e.isDead) {
+                        e.isDead = true;
+                        this.spawnXP(e.x, e.y, 1); // Value based on type
+                        e.destroy({children:true});
+                        // Remove from array later
+                    }
+
+                    if (b.pierce > 0) {
+                        b.pierce--;
+                        // Add to ignore list for a short time? 
+                        // For simplicity, piercing bullets just keep going. 
+                        // We need to prevent hitting SAME enemy next frame.
+                        // b.hitList.add(e.id); // If we had IDs.
+                    } else {
+                        b.isDead = true;
+                    }
+                }
+            }
+        }
+
+        // Cleanup dead enemies
+        this.enemies = this.enemies.filter(e => !e.isDead);
+    }
+
+    triggerThunderstorm(x: number, y: number) {
+        // Visual: Massive chaos lines
+        for(let i=0; i<10; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const len = 50 + Math.random() * 100;
+            const ex = x + Math.cos(angle) * len;
+            const ey = y + Math.sin(angle) * len;
+            
+            const g = new Graphics();
+            g.moveTo(x, y);
+            // Jagged line
+            const mx = (x+ex)/2 + (Math.random()-0.5)*20;
+            const my = (y+ey)/2 + (Math.random()-0.5)*20;
+            g.lineTo(mx, my);
+            g.lineTo(ex, ey);
+            g.stroke({ width: 2, color: 0xffffff }); // White core
+            
+            // Outer glow effect simulated by another wider line?
+            // Pixi Graphics style
+            
+            const p = new Container() as any;
+            p.addChild(g);
+            p.life = 10;
+            this.world.addChild(p);
+            
+            this.tempEffects.push({
+                container: p,
+                life: 15,
+                onUpdate: (gr, l) => {
+                    gr.alpha = l/15;
+                }
+            });
+        }
+
+        // Area Damage
+        this.spawnText("THUNDERSTORM!", x, y - 20, 0xffff00);
+        
+        // AOE Logic
+        this.enemies.forEach(e => {
+            const dx = e.x - x;
+            const dy = e.y - y;
+            if (dx*dx + dy*dy < 150*150) {
+                e.hp -= 50; 
+                e.hitFlashTimer = 10;
+                this.spawnDamageText(50, e.x, e.y, 0xffff00);
+            }
+        });
+    }
+
+    spawnXP(x: number, y: number, value: number) {
+        const g = new Graphics() as XPOrb;
+        const color = COLORS.XP_GREEN; 
+        g.circle(0,0, 4).fill(color);
+        g.x = x;
+        g.y = y;
+        g.value = value;
+        g.vx = (Math.random()-0.5)*2;
+        g.vy = (Math.random()-0.5)*2;
+        g.isMagnetized = false;
+        
+        this.world.addChild(g);
+        this.xpOrbs.push(g);
+    }
+
+    updateXP(delta: number) {
+        for (let i = this.xpOrbs.length - 1; i >= 0; i--) {
+            const orb = this.xpOrbs[i];
+            
+            // Magnet logic
+            const dx = this.player.x - orb.x;
+            const dy = this.player.y - orb.y;
+            const distSq = dx*dx + dy*dy;
+            
+            if (distSq < this.stats.pickupRange * this.stats.pickupRange) {
+                orb.isMagnetized = true;
+            }
+            
+            if (orb.isMagnetized) {
+                const dist = Math.sqrt(distSq);
+                const speed = 12; // Fast suck
+                orb.x += (dx / dist) * speed * delta;
+                orb.y += (dy / dist) * speed * delta;
+                
+                if (dist < 10) {
+                    // Collected
+                    this.stats.xp += orb.value;
+                    if (this.stats.xp >= this.stats.nextLevelXp) {
+                         this.state = GameState.PRE_LEVEL_UP;
+                         this.preLevelUpTimer = 60; // 1s slow mo effect?
+                         // Actually just trigger level up
+                         // this.triggerLevelUpUI(); 
+                         // Let's do instant for now
+                    }
+                    orb.destroy();
+                    this.xpOrbs.splice(i, 1);
+                }
+            } else {
+                // Decel
+                orb.x += orb.vx;
+                orb.y += orb.vy;
+                orb.vx *= 0.95;
+                orb.vy *= 0.95;
+            }
+        }
+    }
+
+    triggerLevelUpUI() {
+        this.stats.level++;
+        this.stats.xp = 0;
+        this.stats.nextLevelXp = Math.floor(this.stats.nextLevelXp * 1.5);
+        this.state = GameState.LEVEL_UP;
+        this.onGameStateChange(GameState.LEVEL_UP);
+    }
+    
+    // --- Helper Visuals ---
+
+    spawnText(text: string, x: number, y: number, color: number) {
+        const t = new Text({
+            text: text,
+            style: {
+                fontFamily: 'Courier New',
+                fontSize: 24,
+                fill: color,
+                stroke: { color: 0x000000, width: 4 },
+                fontWeight: 'bold'
+            }
+        });
+        t.x = x;
+        t.y = y;
+        t.anchor.set(0.5);
+        this.world.addChild(t);
+        
+        this.floatingTexts.push({
+            container: t,
+            x: x, y: y,
+            life: 60,
+            velocityY: -1
+        });
+    }
+
+    spawnDamageText(dmg: number, x: number, y: number, color: number) {
+        // Limit spawn rate slightly
+        this.spawnText(dmg.toString(), x + (Math.random()-0.5)*10, y - 20, color);
+    }
+
+    spawnParticle(x: number, y: number, color: number, lifeScale = 1, isStatic = false) {
+        const g = new Graphics() as Particle;
+        g.rect(-2, -2, 4, 4).fill(color);
+        g.x = x; g.y = y;
+        g.vx = (Math.random()-0.5)*4;
+        g.vy = (Math.random()-0.5)*4;
+        g.life = 20 * lifeScale;
+        g.maxLife = g.life;
+        g.isStatic = isStatic;
+        
+        this.world.addChild(g);
+        this.particles.push(g);
+    }
+
     updateParticles(delta: number) {
-        for (let i = this.particles.length - 1; i >= 0; i--) {
+        for(let i=this.particles.length-1; i>=0; i--) {
             const p = this.particles[i];
             p.life -= delta;
             if (p.life <= 0) {
@@ -1103,338 +1278,56 @@ export class GameEngine {
         }
     }
 
-    spawnParticle(x: number, y: number, color: number, scale: number = 1, staticP: boolean = false) {
-        if (this.particles.length > 200) return; // limit
-
-        const p = new Graphics() as Particle;
-        p.rect(-2, -2, 4, 4).fill(color);
-        p.x = x; 
-        p.y = y;
-        p.scale.set(scale);
-        p.maxLife = 20 + Math.random() * 20;
-        p.life = p.maxLife;
-        p.isStatic = staticP;
-        
-        if (!staticP) {
-            const a = Math.random() * Math.PI * 2;
-            const s = Math.random() * 2;
-            p.vx = Math.cos(a) * s;
-            p.vy = Math.sin(a) * s;
-        } else {
-            p.vx = 0; p.vy = 0;
-        }
-
-        this.particles.push(p);
-        this.world.addChild(p);
-    }
-
     updateFloatingTexts(delta: number) {
-        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+        for(let i=this.floatingTexts.length-1; i>=0; i--) {
             const ft = this.floatingTexts[i];
             ft.life -= delta;
-            ft.container.y -= ft.velocityY * delta;
-            ft.container.alpha = Math.min(1, ft.life / 20);
-            
             if (ft.life <= 0) {
                 ft.container.destroy();
                 this.floatingTexts.splice(i, 1);
+                continue;
             }
+            ft.container.y += ft.velocityY * delta;
+            ft.container.alpha = ft.life / 30; // fade out last 30 frames
         }
     }
-    
+
     updateTempEffects(delta: number) {
-        for (let i = this.tempEffects.length - 1; i >= 0; i--) {
+        for(let i=this.tempEffects.length-1; i>=0; i--) {
             const eff = this.tempEffects[i];
             eff.life -= delta;
-            
-            if (eff.type === 'storm') {
-                // Lightning Storm logic: Flash random bolts inside area
-                eff.container.clear();
-                eff.container.circle(0,0, 100).fill({ color: 0xFFFFFF, alpha: 0.1 });
-                
-                // Draw 3-5 random bolts
-                for(let k=0; k<3; k++) {
-                    const angle = Math.random() * Math.PI * 2;
-                    const len = Math.random() * 90;
-                    const sx = Math.cos(angle) * (len * 0.2);
-                    const sy = Math.sin(angle) * (len * 0.2);
-                    const ex = Math.cos(angle) * len;
-                    const ey = Math.sin(angle) * len;
-                    
-                    eff.container.moveTo(sx, sy);
-                    // Midpoint jitter
-                    eff.container.lineTo((sx+ex)/2 + (Math.random()-0.5)*20, (sy+ey)/2 + (Math.random()-0.5)*20);
-                    eff.container.lineTo(ex, ey);
-                    
-                    const col = Math.random() > 0.5 ? 0xffd700 : 0x2979ff;
-                    eff.container.stroke({ width: 2, color: col });
-                }
-            }
-
-            eff.onUpdate(eff.container, eff.life, eff.maxLife);
-            
             if (eff.life <= 0) {
                 eff.container.destroy();
                 this.tempEffects.splice(i, 1);
+                continue;
             }
+            eff.onUpdate(eff.container, eff.life);
         }
     }
-
-    spawnText(str: string, x: number, y: number, color: number) {
-        if (this.floatingTexts.length > 50) return;
-        
-        const t = new Text({
-            text: str,
-            style: {
-                fontFamily: 'Courier New',
-                fontSize: 16,
-                fill: color,
-                stroke: { color: 0x000000, width: 3 },
-                fontWeight: 'bold'
-            }
-        });
-        t.anchor.set(0.5);
-        t.x = x;
-        t.y = y;
-        this.world.addChild(t);
-        
-        this.floatingTexts.push({
-            container: t,
-            x, y,
-            life: 40,
-            velocityY: 1
-        });
+    
+    // --- API for React/GM ---
+    
+    resume() {
+        this.state = GameState.PLAYING;
     }
-
-    handleCollisions(delta: number) {
-        // Player vs Obstacles (Simple bounds)
-        // Skip for now, open field
-        
-        // Bullets vs Enemies
-        for (const b of this.bullets) {
-            if (b.isDead) continue;
-            
-            // Optimization: Spatial hash would be better
-            for (const e of this.enemies) {
-                if (e.isDead) continue;
-                if (b.hitList.has(e.uid)) continue; // e.uid is internal PIXI id? No, use object ref check or add ID
-
-                const dx = b.x - e.x;
-                const dy = b.y - e.y;
-                const dist = Math.sqrt(dx*dx + dy*dy);
-                
-                if (dist < (b.radius + e.radius)) {
-                    // HIT
-                    this.applyDamage(e, b.damage, b.element);
-                    
-                    // Logic: Tracking Hits for Synergy
-                    if (b.element === ElementType.LIGHTNING) {
-                        e.hitByLightningYellow = 60; // 1 second window
-                    }
-                    if (b.element === ElementType.LIGHTNING_BLUE) {
-                        e.hitByLightningBlue = 60;
-                    }
-
-                    // CHECK SYNERGY: THUNDERSTORM
-                    if (e.hitByLightningYellow > 0 && e.hitByLightningBlue > 0) {
-                        this.triggerThunderstorm(e);
-                        // Reset timers so we don't trigger every frame
-                        e.hitByLightningYellow = 0;
-                        e.hitByLightningBlue = 0;
-                    }
-
-                    // Knockback
-                    const angle = Math.atan2(dy, dx);
-                    e.knockbackVx = -Math.cos(angle) * 200 * (10 / e.radius); // lighter enemies fly further
-                    e.knockbackVy = -Math.sin(angle) * 200 * (10 / e.radius);
-                    
-                    // Pierce logic
-                    if (!b.hitList.has(e.uid)) {
-                        b.pierce--;
-                        // We use the object itself as key if we can, or just add a prop
-                        // For simplicity, let's assume b.hitList stores unique IDs we assign or PIXI uniqueId
-                        // using checking existence
-                    }
-                    
-                    if (b.pierce <= 0) {
-                        b.isDead = true;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Player vs Enemies (Contact Damage)
-        if (this.player.invulnTimer <= 0) {
-            for (const e of this.enemies) {
-                if (e.isDead) continue;
-                const dx = this.player.x - e.x;
-                const dy = this.player.y - e.y;
-                if (Math.sqrt(dx*dx + dy*dy) < (this.player.radius + e.radius)) {
-                    this.player.hp -= 5; // Fixed damage for now
-                    this.player.invulnTimer = 30; // 0.5s invuln
-                    this.spawnText("-5", this.player.x, this.player.y - 20, 0xff0000);
-                    
-                    if (this.player.hp <= 0) {
-                        this.onGameStateChange(GameState.GAME_OVER);
-                    }
-                    break; 
-                }
-            }
-        }
-    }
-
-    triggerThunderstorm(target: Entity) {
-        // Visual: Area Effect
-        const g = new Graphics();
-        g.x = target.x;
-        g.y = target.y;
-        this.world.addChild(g);
-        
-        this.tempEffects.push({
-            container: g,
-            life: 30, // 0.5 sec duration
-            maxLife: 30,
-            type: 'storm',
-            onUpdate: (gr, life, maxLife) => {
-                 gr.alpha = life/maxLife;
-            }
-        });
-
-        this.spawnText("STORM!", target.x, target.y - 30, 0xffd700);
-
-        // Logic: Damage Area
-        // Instant damage to all nearby
-        for (const e of this.enemies) {
-            if(e.isDead) continue;
-            const d = Math.sqrt((e.x - target.x)**2 + (e.y - target.y)**2);
-            if (d < 100) {
-                this.applyDamage(e, 50 * this.stats.damageMultiplier, ElementType.LIGHTNING);
-            }
-        }
-    }
-
-    applyDamage(e: Entity, dmg: number, type: ElementType) {
-        e.hp -= dmg;
-        e.hitFlashTimer = 5;
-        e.tint = 0xff0000;
-        
-        if (Math.random() > 0.5) { // lessen text spam
-            this.spawnText(Math.floor(dmg).toString(), e.x, e.y - e.radius - 10, 0xffffff);
-        }
-
-        if (e.hp <= 0) {
-            e.isDead = true;
-            e.visible = false; 
-            // Spawn XP
-            this.spawnXP(e.x, e.y, (e as any).xpValue || 1);
-            
-            // Clean up later or pool
-            e.destroy(); 
-            this.enemies = this.enemies.filter(en => en !== e);
-            
-            if (e.isBoss) {
-                 this.spawnText("VICTORY?", this.player.x, this.player.y - 50, 0xffff00);
-                 // maybe drop chest
-            }
-        }
-    }
-
-    spawnXP(x: number, y: number, value: number) {
-        const xp = new Graphics() as XPOrb;
-        let color = COLORS.XP_GREEN;
-        if (value > 5) color = COLORS.XP_BLUE;
-        if (value > 20) color = COLORS.XP_ORANGE;
-        
-        xp.circle(0,0, 4).fill(color);
-        xp.x = x;
-        xp.y = y;
-        xp.value = value;
-        xp.vx = 0; xp.vy = 0;
-        
-        this.xpOrbs.push(xp);
-        this.world.addChild(xp);
-    }
-
-    updateXP(delta: number) {
-        const rangeSq = this.stats.pickupRange ** 2;
-        
-        for (let i = this.xpOrbs.length - 1; i >= 0; i--) {
-            const orb = this.xpOrbs[i];
-            const dx = this.player.x - orb.x;
-            const dy = this.player.y - orb.y;
-            const distSq = dx*dx + dy*dy;
-            
-            if (distSq < rangeSq || orb.isMagnetized) {
-                orb.isMagnetized = true;
-                const dist = Math.sqrt(distSq);
-                const spd = 8 * delta; // fast suck
-                orb.x += (dx / dist) * spd;
-                orb.y += (dy / dist) * spd;
-                
-                if (dist < 10) {
-                    this.gainXP(orb.value);
-                    orb.destroy();
-                    this.xpOrbs.splice(i, 1);
-                }
-            }
-        }
-    }
-
-    gainXP(amount: number) {
-        this.stats.xp += amount;
-        if (this.stats.xp >= this.stats.nextLevelXp) {
-            this.stats.xp -= this.stats.nextLevelXp;
-            this.stats.level++;
-            this.stats.nextLevelXp = Math.floor(this.stats.nextLevelXp * 1.5);
-            
-            this.state = GameState.PRE_LEVEL_UP;
-            this.preLevelUpTimer = 60; // 1 second animation
-            // Visual Flair
-            this.spawnText("LEVEL UP!", this.player.x, this.player.y - 50, 0xffff00);
-            
-            this.onGameStateChange(GameState.PRE_LEVEL_UP);
-        }
-    }
-
-    triggerLevelUpUI() {
-        this.state = GameState.LEVEL_UP;
-        this.onGameStateChange(GameState.LEVEL_UP);
-    }
-
+    
     addCard(card: CardDef) {
         this.stats.inventory.push(card);
-        // Apply immediate stat cards
-        if (card.type === CardType.STAT && card.statBonus) {
-            if (card.statBonus.hpPercent) {
-                 this.player.maxHp *= (1 + card.statBonus.hpPercent);
-                 this.player.hp = this.player.maxHp; // Heal on level up
-            }
-            if (card.statBonus.dmgPercent) this.stats.damageMultiplier += card.statBonus.dmgPercent;
-        }
-        
-        // Resume handled by UI
     }
 
-    // --- GM Methods ---
+    reorderInventory(newInventory: CardDef[]) {
+        this.stats.inventory = newInventory;
+    }
+    
     debugRemoveCard(index: number) {
         this.stats.inventory.splice(index, 1);
     }
     
     debugSetWave(w: number) {
         this.wave = w;
-        this.waveTotalEnemies = 20 + w*5;
-        this.spawnText(`GM: WAVE ${w}`, this.player.x, this.player.y, 0xff00ff);
+        this.waveEnemiesSpawned = 0;
     }
 
-    reorderInventory(newInv: CardDef[]) {
-        this.stats.inventory = newInv;
-    }
-
-    resume() {
-        this.state = GameState.PLAYING;
-    }
-    
     destroy() {
         this.app.destroy(true, { children: true });
         window.removeEventListener('keydown', this.handleKeyDown);

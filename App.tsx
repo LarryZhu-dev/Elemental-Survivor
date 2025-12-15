@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { GameEngine } from './engine';
 import { GameState, MapType, PlayerStats, CardDef, CardType, Rarity } from './types';
@@ -26,10 +25,14 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
     
     // Split items into buckets based on layoutMap
     // Memoize this calculation so we don't re-calculate on every render unless props change
+    // However, since we need to render the DOM elements for Muuri to pick up, we do this in render.
     const buckets: CardDef[][] = Array.from({ length: rowCount }, () => []);
     
     items.forEach(item => {
         let rowIndex = layoutMap[item.id];
+        // If no saved layout, default to row 0 (or distribute if we wanted smart defaults)
+        // Let's just put new items in the first row that isn't "full" visually, or just Row 0.
+        // For simplicity, default to Row 0.
         if (rowIndex === undefined || rowIndex < 0 || rowIndex >= rowCount) {
              rowIndex = 0;
         }
@@ -78,7 +81,7 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
                 dragSort: () => gridsRef.current, // Sort among all active grids
                 layout: {
                     fillGaps: true,
-                    horizontal: true, 
+                    horizontal: true, // Use horizontal layout within rows for "Chain" feel
                     alignRight: false,
                     alignBottom: false,
                     rounding: false
@@ -97,14 +100,14 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
             gridsRef.current.forEach(g => g.destroy());
             gridsRef.current = [];
         };
-    }, [items, rowCount]); 
+    }, [items, rowCount]); // Re-init when items change or row count changes
 
     return (
         <div className="spell-board-container">
              {buckets.map((bucketItems, rowIndex) => (
                  <div key={rowIndex}>
-                     <div className="spell-row-label">Spell Group {rowIndex + 1}</div>
-                     <div className="spell-row" ref={el => rowRefs.current[rowIndex] = el}>
+                     <div className="spell-row-label">符文序列 {rowIndex + 1}</div>
+                     <div className="spell-row" ref={el => { rowRefs.current[rowIndex] = el; }}>
                         {bucketItems.map((card) => (
                             <div key={card.id} className="item" data-id={card.id}>
                                 <div 
@@ -117,8 +120,9 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
                                      {card.type === CardType.BUFF && <div className="badge badge-buff">BF</div>}
                                      {card.type === CardType.ARTIFACT && <div className="badge badge-art">ART</div>}
                                      
-                                     <span style={{ color: card.iconColor, fontSize: '1.2rem', textShadow: '0 1px 2px black' }}>
-                                         {card.name.substring(0,1)}
+                                     {/* Just show icon/first letter, color handled by CSS classes now */}
+                                     <span>
+                                         {card.name.substring(0,2)}
                                      </span>
                                 </div>
                             </div>
@@ -258,7 +262,7 @@ const App = () => {
           setTimeout(() => setBossWarning(null), 3000);
       },
       (isAuto) => {
-          setAimStatus(isAuto ? "AUTO" : "MANUAL");
+          setAimStatus(isAuto ? "自动" : "手动");
       }
     );
     engineRef.current = engine;
@@ -360,32 +364,44 @@ const App = () => {
 
       {/* --- MENU --- */}
       {gameState === GameState.MENU && (
-        <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center z-50">
-          <h1 className="menu-title">ELEMENTAL<br/>SURVIVOR</h1>
+        <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-6 z-50">
+          <h1 className="menu-title mb-8 text-6xl text-cyan-400 font-bold drop-shadow-md">ELEMENTAL SURVIVOR</h1>
           <div className="flex flex-col gap-4">
             <button 
               onClick={() => startGame(MapType.FIXED)}
-              className="btn"
+              className="btn btn-primary"
             >
-              START GAME
+              开始游戏
             </button>
           </div>
-          <div className="instructions mt-8 text-center">
-            <p>DRAG to Move. [A] to Toggle Aim.</p>
-            <p>Combine Elements to discover synergies.</p>
+          <div className="mt-8 text-center text-gray-400 text-sm">
+            点击地面或使用摇杆移动.<br/>
+            按 [A] 键切换手动/自动瞄准.<br/>
+            Esc/右上角按钮 暂停整理背包.<br/>
           </div>
         </div>
       )}
 
       {/* --- HUD --- */}
       {(gameState === GameState.PLAYING || gameState === GameState.PRE_LEVEL_UP) && stats && (
-        <div className="hud-layer">
+        <>
+        <div className="absolute inset-0 pointer-events-none">
            {/* Boss Warning */}
            {bossWarning && (
-             <div className="boss-warning-container">
-               <div className="boss-text">{bossWarning}</div>
+             <div className="absolute top-24 left-1/2 transform -translate-x-1/2 text-red-500 font-bold text-3xl animate-pulse bg-black/50 px-4 py-2 border-y-2 border-red-600">
+               {bossWarning}
              </div>
            )}
+
+           {/* Aim Status */}
+           <div className="aim-status" onClick={() => {
+               if(engineRef.current) {
+                   engineRef.current.isAutoAim = !engineRef.current.isAutoAim;
+                   engineRef.current.onUpdateAimStatus(engineRef.current.isAutoAim);
+               }
+           }}>
+               瞄准模式: {aimStatus}
+           </div>
 
            {/* HP Bar */}
            <div className="bar-container bar-hp">
@@ -405,13 +421,12 @@ const App = () => {
                style={{ width: `${(stats.xp / stats.nextLevelXp) * 100}%` }} 
              />
            </div>
-           
-           <div className="lvl-badge">
-             {stats.level}
+           <div className="lvl-text">
+             LV {stats.level}
            </div>
 
            {/* Wave Info */}
-           <div className="wave-display">
+           <div className="wave-info">
              <div className="wave-title">WAVE {engineRef.current?.wave}</div>
              <div className="wave-timer">
                 ENEMIES: {engineRef.current?.waveTotalEnemies && engineRef.current.waveEnemiesSpawned !== undefined 
@@ -419,25 +434,24 @@ const App = () => {
                   : 0}
              </div>
            </div>
-           
-           <div className="aim-toggle">AIM: {aimStatus}</div>
-
-           {/* Pause Icon Button */}
-           <div className="pause-btn" onClick={handlePause}>
-               <svg viewBox="0 0 24 24">
-                   <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
-               </svg>
-           </div>
-           
-           {/* Mobile Joystick Overlay */}
-           <Joystick onMove={handleJoystickMove} />
         </div>
+
+        {/* Mobile Controls */}
+        <Joystick onMove={handleJoystickMove} />
+        
+        <button className="pause-btn" onClick={handlePause}>
+             {/* Pause Icon SVG */}
+             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                 <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+             </svg>
+        </button>
+        </>
       )}
 
       {/* --- PAUSE / LEVEL UP / GAME OVER / VICTORY OVERLAYS --- */}
       {(gameState === GameState.PAUSED || gameState === GameState.LEVEL_UP || gameState === GameState.GAME_OVER || gameState === GameState.VICTORY) && (
-          <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-4 z-50 p-4 overflow-y-auto">
-              <h2 className="menu-title" style={{fontSize: '3rem'}}>
+          <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-4 z-50 p-4">
+              <h2 className="text-4xl text-white font-bold tracking-widest mb-4">
                   {gameState === GameState.PAUSED ? "PAUSED" : 
                    gameState === GameState.LEVEL_UP ? "LEVEL UP" : 
                    gameState === GameState.GAME_OVER ? "GAME OVER" : "VICTORY"}
@@ -445,18 +459,18 @@ const App = () => {
 
               {/* Spell Board for Inventory Management */}
               {stats && (gameState === GameState.PAUSED || gameState === GameState.LEVEL_UP) && (
-                  <div className="flex flex-col items-center w-full">
-                      <div className="mb-2 text-center text-gray-400 text-sm">DRAG CARDS TO REORDER SPELL CHAIN</div>
-                      <SpellBoard 
-                        ref={spellBoardRef}
-                        items={stats.inventory}
-                        layoutMap={layoutMap}
-                        onHover={setHoveredCard}
-                        rowCount={rowCount}
-                      />
-                      <div className="w-full max-w-[800px] mt-2">
-                        <button onClick={handleAddRow} className="btn-add-row">
-                            + Add Spell Group
+                  <div className="flex flex-col items-center w-full" style={{maxHeight: '65vh'}}>
+                      <div className="mb-2 text-center text-slate-400 text-sm">拖拽图标调整法术触发顺序 -></div>
+                      <div className="overflow-y-auto w-full flex flex-col items-center pb-4">
+                        <SpellBoard 
+                            ref={spellBoardRef}
+                            items={stats.inventory}
+                            layoutMap={layoutMap}
+                            onHover={setHoveredCard}
+                            rowCount={rowCount}
+                        />
+                        <button onClick={handleAddRow} className="btn-add-group max-w-2xl">
+                           + 添加符文槽位
                         </button>
                       </div>
                   </div>
@@ -465,78 +479,70 @@ const App = () => {
               {/* Hover Details (Fixed Position via CSS class) */}
               {hoveredCard && (
                   <div className="card-detail-tooltip">
-                      <div className="font-bold text-lg" style={{color: hoveredCard.iconColor}}>{hoveredCard.name}</div>
-                      <div className="text-sm text-gray-300 mt-2">{hoveredCard.description}</div>
+                      <div className="font-bold text-xl mb-1" style={{color: hoveredCard.iconColor}}>{hoveredCard.name}</div>
+                      <div className="text-xs uppercase text-slate-500 mb-2">{hoveredCard.type} - {hoveredCard.rarity}</div>
+                      <div className="text-sm text-slate-300 leading-relaxed">{hoveredCard.description}</div>
                   </div>
               )}
 
               {/* Actions */}
-              <div className="card-grid">
+              <div className="flex flex-wrap justify-center gap-4 mt-auto mb-8">
+                  {gameState === GameState.PAUSED && (
+                      <button className="btn btn-primary" onClick={handleResume}>RESUME</button>
+                  )}
+                  
                   {gameState === GameState.LEVEL_UP && levelUpOptions.map((card) => (
                       <div 
                         key={card.id}
                         onClick={() => selectCardForInventory(card)}
                         className={`card rarity-${card.rarity}`}
                       >
-                        <div className="card-particles" /> {/* Background FX */}
-                        
-                        <div className="card-inner">
-                            <div className="card-icon-area">
-                               <div style={{ color: card.iconColor }}>
-                                   {/* Placeholder Icon Logic */}
-                                   {card.type === CardType.ARTIFACT ? '⚔️' : card.type === CardType.STAT ? '💪' : '✨'}
-                               </div>
+                         <div className="card-inner">
+                            <div className="card-icon">
+                               <div style={{ color: card.iconColor }}>★</div>
                             </div>
                             <h3 className="card-name">{card.name}</h3>
                             <p className="card-desc">{card.description}</p>
-                            <div className="card-footer">
-                                <span>{card.type}</span>
-                                <span style={{color: card.iconColor}}>★</span>
-                            </div>
+                            <div className="card-type">{card.type}</div>
                         </div>
                       </div>
                   ))}
-              </div>
 
-              <div className="flex gap-4 mt-8">
-                {gameState === GameState.PAUSED && (
-                      <button className="btn" onClick={handleResume}>RESUME</button>
-                  )}
-                {(gameState === GameState.GAME_OVER || gameState === GameState.VICTORY) && (
-                      <button className="btn" onClick={() => window.location.reload()}>MAIN MENU</button>
+                  {(gameState === GameState.GAME_OVER || gameState === GameState.VICTORY) && (
+                      <button className="btn btn-danger" onClick={() => window.location.reload()}>MAIN MENU</button>
                   )}
               </div>
               
-              {/* GM Mode Tools - Fixed Panel */}
+              {/* GM Mode Tools */}
               {isGmMode && (
                   <div className="gm-panel">
-                      <div className="gm-title">GM DEBUG</div>
-                      
-                      <div className="gm-section">
-                          <div className="gm-label">Wave Control</div>
-                          <input type="number" placeholder="Set Wave" onChange={gmSetWave} className="gm-input"/>
+                      <div className="gm-header">
+                          <span>GM DEBUG TOOLS</span>
+                          <button className="gm-close" onClick={() => setIsGmMode(false)}>×</button>
                       </div>
+                      <div className="gm-content">
+                        <div className="gm-section-title">Game State</div>
+                        <div className="gm-grid">
+                            <div>Wave: <input type="number" onChange={gmSetWave} className="text-black w-16 px-1 rounded"/></div>
+                        </div>
 
-                      <div className="gm-section">
-                          <div className="gm-label">Add Card</div>
-                          <div className="gm-grid">
+                        <div className="gm-section-title">Add Card</div>
+                        <div className="gm-grid">
                             {ALL_CARDS.map(c => (
                                 <button key={c.id} onClick={() => selectCardForInventory(c)} className="gm-btn">
                                     {c.name}
                                 </button>
                             ))}
-                          </div>
-                      </div>
+                        </div>
 
-                      <div className="gm-section">
-                          <div className="gm-label">Remove Index</div>
-                          <div className="gm-grid">
-                               {stats?.inventory.map((c, i) => (
-                                   <button key={i} onClick={() => gmRemoveCard(i)} className="gm-btn" style={{borderColor: '#ef4444'}}>
-                                       {i}: {c.name.substring(0,8)}...
-                                   </button>
-                               ))}
-                          </div>
+                        <div className="gm-section-title">Current Inventory</div>
+                        <div className="gm-grid">
+                            {stats?.inventory.map((c, i) => (
+                                <button key={i} onClick={() => gmRemoveCard(i)} className="gm-btn" style={{borderColor: '#ef4444'}}>
+                                    [X] {c.name}
+                                </button>
+                            ))}
+                        </div>
                       </div>
                   </div>
               )}
