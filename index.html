@@ -376,30 +376,37 @@
       }
       
       /* Muuri Grid Styles */
-      .grid-container-wrapper {
+      .spell-board-container {
         width: 90vw;
         max-width: 600px;
-        height: 400px; /* Default Desktop Height */
         background: rgba(0,0,0,0.3);
         border: 2px solid #333;
         border-radius: 8px;
-        overflow-y: auto;
-        position: relative;
+        padding: 10px;
         box-sizing: border-box;
       }
-      @media (max-width: 800px) {
-          .grid-container-wrapper {
-              width: 100%;
-              height: auto;
-              min-height: 200px;
-              max-height: 40vh; /* Don't take up too much vertical space on mobile */
-          }
+      
+      .spell-row-label {
+        font-size: 0.75rem;
+        color: #64748b;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        font-weight: bold;
+      }
+
+      .spell-row {
+        width: 100%;
+        min-height: 90px; 
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        margin-bottom: 12px;
+        position: relative;
+        border: 1px dashed #444;
       }
 
       .grid {
         position: relative;
         width: 100%;
-        min-height: 100%; 
       }
       
       .item {
@@ -412,24 +419,23 @@
         cursor: grab;
         touch-action: none; /* REQUIRED FOR MOBILE DRAG */
       }
+      /* CRITICAL FIX FOR DRAGGING VISIBILITY */
+      .item.muuri-item-dragging {
+        z-index: 9999 !important;
+      }
+      .item.muuri-item-releasing {
+        z-index: 9998 !important;
+      }
+      
       @media (max-width: 600px) {
           .item { width: 60px; height: 60px; margin: 5px; }
+          .spell-row { min-height: 80px; }
       }
       
       .item:active {
         cursor: grabbing;
       }
 
-      .item.muuri-item-dragging {
-        z-index: 3;
-      }
-      .item.muuri-item-releasing {
-        z-index: 2;
-      }
-      .item.muuri-item-hidden {
-        z-index: 0;
-      }
-      
       .item-content {
         width: 100%;
         height: 100%;

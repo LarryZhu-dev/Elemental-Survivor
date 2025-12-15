@@ -12,83 +12,130 @@ declare global {
     }
 }
 
-// Helper to keep track of hovered item for details panel
-interface HoveredItem {
-    card: CardDef;
-}
-
-interface InventoryGridProps {
+interface SpellBoardProps {
     items: CardDef[];
+    layoutMap: {[id: string]: number}; // Maps card ID to row index (0-3)
     onHover: (item: CardDef | null) => void;
 }
 
-const InventoryGrid = forwardRef(({ items, onHover }: InventoryGridProps, ref) => {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const gridRef = useRef<any>(null);
+// Fixed number of rows for spell chains
+const ROW_COUNT = 4;
+
+const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
+    const { items, layoutMap, onHover } = props;
+    const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+    const gridsRef = useRef<any[]>([]);
+    
+    // Split items into buckets based on layoutMap
+    // Memoize this calculation so we don't re-calculate on every render unless props change
+    // However, since we need to render the DOM elements for Muuri to pick up, we do this in render.
+    const buckets: CardDef[][] = Array.from({ length: ROW_COUNT }, () => []);
+    
+    items.forEach(item => {
+        let rowIndex = layoutMap[item.id];
+        // If no saved layout, default to row 0 (or distribute if we wanted smart defaults)
+        // Let's just put new items in the first row that isn't "full" visually, or just Row 0.
+        // For simplicity, default to Row 0.
+        if (rowIndex === undefined || rowIndex < 0 || rowIndex >= ROW_COUNT) {
+             rowIndex = 0;
+        }
+        buckets[rowIndex].push(item);
+    });
 
     useImperativeHandle(ref, () => ({
-        getOrder: () => {
-            if (!gridRef.current) return [];
-            // Get current order of elements
-            const gridItems = gridRef.current.getItems();
-            return gridItems.map((item: any) => item.getElement().getAttribute('data-id'));
+        // Returns both the linear order (for Engine) and the layout map (for UI persistence)
+        getLayoutData: () => {
+            const newOrder: string[] = [];
+            const newLayoutMap: {[id: string]: number} = {};
+
+            gridsRef.current.forEach((grid, rowIndex) => {
+                if (!grid) return;
+                const gridItems = grid.getItems();
+                gridItems.forEach((item: any) => {
+                    const id = item.getElement().getAttribute('data-id');
+                    if (id) {
+                        newOrder.push(id);
+                        newLayoutMap[id] = rowIndex;
+                    }
+                });
+            });
+            
+            return { newOrder, newLayoutMap };
         }
     }));
 
     useEffect(() => {
-        if (!containerRef.current) return;
-
-        // Ensure previous instance is cleaned up to prevent duplicates or stale layouts
-        if (gridRef.current) {
-            gridRef.current.destroy();
-        }
-
-        // Init Muuri with updated items
-        gridRef.current = new Muuri(containerRef.current, {
-            dragEnabled: true,
-            layoutOnInit: true,
-            dragContainer: document.body, // Allows dragging outside the scrollable area visually
-            dragSort: true,
-            layout: {
-                fillGaps: true,
-                horizontal: false,
-                alignRight: false,
-                alignBottom: false,
-                rounding: false
-            }
+        // Init Muuri for each row
+        const grids: any[] = [];
+        
+        rowRefs.current.forEach((el, i) => {
+            if (!el) return;
+            
+            // Destroy existing if any (react strict mode double invoke protection)
+            // But we ideally clear gridsRef on cleanup
         });
 
-        // Cleanup
+        // Cleanup previous instances first
+        gridsRef.current.forEach(g => g.destroy());
+        gridsRef.current = [];
+
+        rowRefs.current.forEach((el, i) => {
+            if (!el) return;
+            const grid = new Muuri(el, {
+                dragEnabled: true,
+                items: '.item',
+                dragContainer: document.body, 
+                dragSort: () => gridsRef.current, // Sort among all active grids
+                layout: {
+                    fillGaps: true,
+                    horizontal: true, // Use horizontal layout within rows for "Chain" feel
+                    alignRight: false,
+                    alignBottom: false,
+                    rounding: false
+                },
+                dragStartPredicate: {
+                    distance: 10,
+                    delay: 0
+                }
+            });
+            grids.push(grid);
+        });
+
+        gridsRef.current = grids;
+
         return () => {
-            if (gridRef.current) {
-                gridRef.current.destroy();
-                gridRef.current = null;
-            }
+            gridsRef.current.forEach(g => g.destroy());
+            gridsRef.current = [];
         };
-    }, [items]); // Re-run when items list changes (e.g. GM add, or initial load)
+    }, [items]); // Re-init when items change (e.g. from GM add)
 
     return (
-        <div className="grid-container-wrapper">
-             <div ref={containerRef} className="grid">
-                {items.map((card) => (
-                    <div key={card.id} className="item" data-id={card.id}>
-                        <div 
-                            className={`item-content rarity-${card.rarity}`}
-                            onMouseEnter={() => onHover(card)}
-                            onMouseLeave={() => onHover(null)}
-                            onTouchStart={() => onHover(card)}
-                        >
-                             {card.type === CardType.EFFECT && <div className="badge badge-effect">EF</div>}
-                             {card.type === CardType.BUFF && <div className="badge badge-buff">BF</div>}
-                             {card.type === CardType.ARTIFACT && <div className="badge badge-art">ART</div>}
-                             
-                             <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
-                                 {card.name.substring(0,2)}
-                             </span>
-                        </div>
-                    </div>
-                ))}
-             </div>
+        <div className="spell-board-container">
+             {buckets.map((bucketItems, rowIndex) => (
+                 <div key={rowIndex}>
+                     <div className="spell-row-label">法术组 {rowIndex + 1}</div>
+                     <div className="spell-row" ref={el => rowRefs.current[rowIndex] = el}>
+                        {bucketItems.map((card) => (
+                            <div key={card.id} className="item" data-id={card.id}>
+                                <div 
+                                    className={`item-content rarity-${card.rarity}`}
+                                    onMouseEnter={() => onHover(card)}
+                                    onMouseLeave={() => onHover(null)}
+                                    onTouchStart={() => onHover(card)}
+                                >
+                                     {card.type === CardType.EFFECT && <div className="badge badge-effect">EF</div>}
+                                     {card.type === CardType.BUFF && <div className="badge badge-buff">BF</div>}
+                                     {card.type === CardType.ARTIFACT && <div className="badge badge-art">ART</div>}
+                                     
+                                     <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
+                                         {card.name.substring(0,2)}
+                                     </span>
+                                </div>
+                            </div>
+                        ))}
+                     </div>
+                 </div>
+             ))}
         </div>
     );
 });
@@ -99,20 +146,22 @@ const Joystick = ({ onMove }: { onMove: (x: number, y: number) => void }) => {
     const touchIdRef = useRef<number | null>(null);
 
     const handleStart = (e: React.TouchEvent) => {
-        const touch = e.changedTouches[0];
+        const touch = e.changedTouches[0] as React.Touch;
         touchIdRef.current = touch.identifier;
         updateJoystick(touch.clientX, touch.clientY);
     };
 
     const handleMove = (e: React.TouchEvent) => {
-        const touch = Array.from(e.changedTouches).find(t => t.identifier === touchIdRef.current);
+        const touches = Array.from(e.changedTouches) as React.Touch[];
+        const touch = touches.find(t => t.identifier === touchIdRef.current);
         if (touch) {
             updateJoystick(touch.clientX, touch.clientY);
         }
     };
 
     const handleEnd = (e: React.TouchEvent) => {
-        const touch = Array.from(e.changedTouches).find(t => t.identifier === touchIdRef.current);
+        const touches = Array.from(e.changedTouches) as React.Touch[];
+        const touch = touches.find(t => t.identifier === touchIdRef.current);
         if (touch) {
             touchIdRef.current = null;
             resetJoystick();
@@ -168,7 +217,7 @@ const Joystick = ({ onMove }: { onMove: (x: number, y: number) => void }) => {
 const App = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<GameEngine | null>(null);
-  const gridComponentRef = useRef<any>(null);
+  const spellBoardRef = useRef<any>(null);
 
   const [gameState, setGameState] = useState<GameState>(GameState.MENU);
   const [stats, setStats] = useState<PlayerStats | null>(null);
@@ -177,6 +226,9 @@ const App = () => {
   const [aimStatus, setAimStatus] = useState<string>("自动");
   const [isGmMode, setIsGmMode] = useState(false);
   
+  // Layout State for Spell Board persistence
+  const [layoutMap, setLayoutMap] = useState<{[id: string]: number}>({});
+
   // Hover state for inventory details
   const [hoveredCard, setHoveredCard] = useState<CardDef | null>(null);
 
@@ -271,15 +323,18 @@ const App = () => {
   };
 
   const handleResume = () => {
-      if (gridComponentRef.current && stats && engineRef.current) {
-          const newOrderIds: string[] = gridComponentRef.current.getOrder();
+      if (spellBoardRef.current && stats && engineRef.current) {
+          const { newOrder, newLayoutMap } = spellBoardRef.current.getLayoutData();
           
-          // Reconstruct inventory based on IDs
+          // Save UI layout persistence
+          setLayoutMap(newLayoutMap);
+
+          // Reconstruct inventory based on IDs for the engine logic (linear execution)
           const map = new Map(stats.inventory.map(c => [c.id, c]));
-          const newInventory = newOrderIds.map(id => map.get(id)).filter(Boolean) as CardDef[];
+          const newInventory = newOrder.map((id: string) => map.get(id)).filter(Boolean) as CardDef[];
           
           // Append any missing items (safety check)
-          const currentIds = new Set(newOrderIds);
+          const currentIds = new Set(newOrder);
           const missing = stats.inventory.filter(c => !currentIds.has(c.id));
           const finalInventory = [...newInventory, ...missing];
           
@@ -332,6 +387,13 @@ const App = () => {
       {(gameState === GameState.PLAYING || gameState === GameState.PRE_LEVEL_UP) && stats && (
         <>
         <div className="absolute inset-0 pointer-events-none p-4">
+           {/* Boss Warning */}
+           {bossWarning && (
+             <div className="absolute top-20 left-1/2 transform -translate-x-1/2 text-red-500 font-bold text-3xl animate-pulse">
+               {bossWarning}
+             </div>
+           )}
+
            {/* Aim Status */}
            <div className="aim-status">
                瞄准: {aimStatus} [A]
@@ -374,146 +436,88 @@ const App = () => {
         <Joystick onMove={handleJoystickMove} />
         
         <button className="pause-btn" onClick={handlePause}>
-             ||
+            PAUSE
         </button>
         </>
       )}
 
-      {/* --- GM PANEL --- */}
-      {isGmMode && (
-          <div className="gm-panel z-100 pointer-events-auto">
-              <div className="gm-header flex justify-between">
-                  <span>GM DEBUG PANEL</span>
-                  <button className="btn-sm" onClick={() => setIsGmMode(false)}>X</button>
+      {/* --- PAUSE / LEVEL UP / GAME OVER / VICTORY OVERLAYS --- */}
+      {(gameState === GameState.PAUSED || gameState === GameState.LEVEL_UP || gameState === GameState.GAME_OVER || gameState === GameState.VICTORY) && (
+          <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-4 z-50 p-8">
+              <h2 className="menu-title text-2xl">
+                  {gameState === GameState.PAUSED ? "已暂停" : 
+                   gameState === GameState.LEVEL_UP ? "升级!" : 
+                   gameState === GameState.GAME_OVER ? "游戏结束" : "胜利!"}
+              </h2>
+
+              {/* Spell Board for Inventory Management */}
+              {stats && (gameState === GameState.PAUSED || gameState === GameState.LEVEL_UP) && (
+                  <div className="w-full max-w-4xl bg-black/50 p-4 rounded-lg overflow-y-auto" style={{maxHeight: '60vh'}}>
+                      <div className="mb-2 text-center text-white/70">拖拽调整法术施放顺序 (从左到右，从上到下)</div>
+                      <SpellBoard 
+                        ref={spellBoardRef}
+                        items={stats.inventory}
+                        layoutMap={layoutMap}
+                        onHover={setHoveredCard}
+                      />
+                  </div>
+              )}
+
+              {/* Hover Details */}
+              {hoveredCard && (
+                  <div className="card-detail-tooltip p-4 border border-white/20 bg-slate-900 rounded-lg max-w-md pointer-events-none">
+                      <div className="font-bold text-lg" style={{color: hoveredCard.iconColor}}>{hoveredCard.name}</div>
+                      <div className="text-sm text-white/80">{hoveredCard.description}</div>
+                  </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-4 mt-4">
+                  {gameState === GameState.PAUSED && (
+                      <button className="btn btn-primary" onClick={handleResume}>继续游戏</button>
+                  )}
+                  
+                  {gameState === GameState.LEVEL_UP && levelUpOptions.map((card) => (
+                      <div key={card.id} className="flex flex-col gap-2">
+                          <button 
+                            className="card-choice-btn p-4 border border-white/20 rounded hover:bg-white/10 flex flex-col items-center gap-2"
+                            onClick={() => selectCardForInventory(card)}
+                          >
+                              <div className="font-bold" style={{color: card.iconColor}}>{card.name}</div>
+                              <div className="text-xs">{card.description}</div>
+                              <div className={`badge rarity-${card.rarity}`}>{card.rarity}</div>
+                          </button>
+                      </div>
+                  ))}
+
+                  {(gameState === GameState.GAME_OVER || gameState === GameState.VICTORY) && (
+                      <button className="btn btn-danger" onClick={() => window.location.reload()}>返回主菜单</button>
+                  )}
               </div>
               
-              <div className="gm-section">
-                  <div className="gm-label">Current Wave</div>
-                  <input type="number" className="bg-gray-700 text-white p-1" onChange={gmSetWave} defaultValue={engineRef.current?.wave} />
-              </div>
-
-              <div className="gm-section">
-                  <div className="gm-label">Add Card (Click to Add)</div>
-                  <div className="gm-card-grid">
-                      {ALL_CARDS.map(c => (
-                          <button key={c.id} className="gm-card-btn" onClick={() => selectCardForInventory(c)}>
-                              {c.name}
-                          </button>
-                      ))}
+              {/* GM Mode Tools */}
+              {isGmMode && (
+                  <div className="absolute top-4 left-4 p-4 bg-black/80 rounded border border-red-500 z-50">
+                      <div className="text-red-500 font-bold mb-2">GM TOOLS</div>
+                      <div>Set Wave: <input type="number" onChange={gmSetWave} className="text-black w-16"/></div>
+                      <div className="mt-2 text-xs">Available Cards:</div>
+                      <div className="flex flex-wrap gap-1 max-w-sm h-32 overflow-auto">
+                          {ALL_CARDS.map(c => (
+                              <button key={c.id} onClick={() => selectCardForInventory(c)} className="text-xs bg-gray-700 px-1 rounded">
+                                  {c.name}
+                              </button>
+                          ))}
+                      </div>
+                      <div className="mt-2 text-xs">Inventory:</div>
+                      <div className="flex flex-wrap gap-1 max-w-sm h-32 overflow-auto">
+                           {stats?.inventory.map((c, i) => (
+                               <button key={i} onClick={() => gmRemoveCard(i)} className="text-xs bg-red-900 px-1 rounded">
+                                   X {c.name}
+                               </button>
+                           ))}
+                      </div>
                   </div>
-              </div>
-
-              <div className="gm-section">
-                  <div className="gm-label">Current Inventory (Click to Remove)</div>
-                  <div className="gm-card-grid">
-                      {stats?.inventory.map((c, i) => (
-                          <button key={c.id} className="gm-card-btn btn-red" onClick={() => gmRemoveCard(i)}>
-                              {i+1}. {c.name}
-                          </button>
-                      ))}
-                  </div>
-              </div>
-          </div>
-      )}
-
-      {/* --- BOSS WARNING --- */}
-      {bossWarning && (
-         <div className="absolute inset-0 flex items-center justify-center pointer-events-none boss-overlay z-50">
-            <div className="boss-text">
-               警告: {bossWarning}
-            </div>
-         </div>
-      )}
-
-      {/* --- LEVEL UP --- */}
-      {gameState === GameState.LEVEL_UP && (
-        <div className="absolute inset-0 overlay-darker flex flex-col items-center justify-center z-50">
-          <h2 className="levelup-title mb-8">等级提升!</h2>
-          <div className="flex gap-4 flex-wrap justify-center">
-            {levelUpOptions.map((card, i) => (
-              <div 
-                key={i}
-                onClick={() => selectCardForInventory(card)}
-                className={`card rarity-${card.rarity}`}
-              >
-                <div className="card-icon">
-                   <div style={{ color: card.iconColor }}>★</div>
-                </div>
-                <h3 className="card-name mb-2" style={{ color: card.iconColor }}>{card.name}</h3>
-                <p className="card-desc">{card.description}</p>
-                <div className="card-type">{card.type}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* --- PAUSE / INVENTORY --- */}
-      {gameState === GameState.PAUSED && stats && (
-         <div className="absolute inset-0 pause-overlay z-40">
-           <h2 className="pause-title mb-4">法术链调整</h2>
-           <p className="pause-desc mb-4">
-             拖动整理 (左到右, 上到下顺序触发)<br/>
-             Buff/Effect 应放在 Artifact 之前
-           </p>
-           
-           <div className="pause-layout">
-               <InventoryGrid 
-                    ref={gridComponentRef} 
-                    items={stats.inventory} 
-                    onHover={setHoveredCard}
-               />
-
-               {/* Details Panel */}
-               <div className="details-panel">
-                   {hoveredCard ? (
-                       <>
-                           <div className="details-title" style={{color: hoveredCard.iconColor}}>{hoveredCard.name}</div>
-                           <div className="details-type">{hoveredCard.type} - {hoveredCard.rarity}</div>
-                           <div className="details-desc">{hoveredCard.description}</div>
-                       </>
-                   ) : (
-                       <div className="text-gray-500 italic flex h-full items-center justify-center text-center p-4">
-                            触摸/悬停卡片查看详情。<br/>
-                            拖动卡片以排序。
-                       </div>
-                   )}
-               </div>
-           </div>
-
-           <button 
-             onClick={handleResume}
-             className="btn-resume mt-4"
-           >
-             保存并继续
-           </button>
-         </div>
-      )}
-
-      {/* --- GAME OVER --- */}
-      {gameState === GameState.GAME_OVER && (
-          <div className="absolute inset-0 overlay-darker flex flex-col items-center justify-center z-50">
-             <h1 className="text-red-500 text-6xl font-bold mb-4">GAME OVER</h1>
-             <p className="text-white text-xl mb-8">你倒下了...</p>
-             <button onClick={() => window.location.reload()} className="btn btn-fixed">
-               重新开始
-             </button>
-          </div>
-      )}
-
-      {/* --- VICTORY --- */}
-      {gameState === GameState.VICTORY && (
-          <div className="absolute inset-0 victory-overlay flex flex-col items-center justify-center z-50">
-             <h1 className="victory-title mb-8">胜利!</h1>
-             <p className="victory-subtitle mb-8">你击败了终极 BOSS.</p>
-             <div className="cast-box mb-8">
-                <h3 className="cast-title mb-4">Cast</h3>
-                <p>Producer: You</p>
-                <p>Engine: Pixi.js</p>
-                <p>UI: React</p>
-                <p>Thank you for playing!</p>
-             </div>
-             <button onClick={() => window.location.reload()} className="btn-replay mt-8">再玩一次</button>
+              )}
           </div>
       )}
     </div>
