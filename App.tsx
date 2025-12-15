@@ -16,27 +16,25 @@ interface SpellBoardProps {
     items: CardDef[];
     layoutMap: {[id: string]: number}; // Maps card ID to row index (0-3)
     onHover: (item: CardDef | null) => void;
+    rowCount: number;
 }
 
-// Fixed number of rows for spell chains
-const ROW_COUNT = 4;
-
 const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
-    const { items, layoutMap, onHover } = props;
+    const { items, layoutMap, onHover, rowCount } = props;
     const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
     const gridsRef = useRef<any[]>([]);
     
     // Split items into buckets based on layoutMap
     // Memoize this calculation so we don't re-calculate on every render unless props change
     // However, since we need to render the DOM elements for Muuri to pick up, we do this in render.
-    const buckets: CardDef[][] = Array.from({ length: ROW_COUNT }, () => []);
+    const buckets: CardDef[][] = Array.from({ length: rowCount }, () => []);
     
     items.forEach(item => {
         let rowIndex = layoutMap[item.id];
         // If no saved layout, default to row 0 (or distribute if we wanted smart defaults)
         // Let's just put new items in the first row that isn't "full" visually, or just Row 0.
         // For simplicity, default to Row 0.
-        if (rowIndex === undefined || rowIndex < 0 || rowIndex >= ROW_COUNT) {
+        if (rowIndex === undefined || rowIndex < 0 || rowIndex >= rowCount) {
              rowIndex = 0;
         }
         buckets[rowIndex].push(item);
@@ -68,12 +66,8 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
         // Init Muuri for each row
         const grids: any[] = [];
         
-        rowRefs.current.forEach((el, i) => {
-            if (!el) return;
-            
-            // Destroy existing if any (react strict mode double invoke protection)
-            // But we ideally clear gridsRef on cleanup
-        });
+        // Ensure refs array is correct length
+        rowRefs.current = rowRefs.current.slice(0, rowCount);
 
         // Cleanup previous instances first
         gridsRef.current.forEach(g => g.destroy());
@@ -107,7 +101,7 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
             gridsRef.current.forEach(g => g.destroy());
             gridsRef.current = [];
         };
-    }, [items]); // Re-init when items change (e.g. from GM add)
+    }, [items, rowCount]); // Re-init when items change or row count changes
 
     return (
         <div className="spell-board-container">
@@ -228,6 +222,7 @@ const App = () => {
   
   // Layout State for Spell Board persistence
   const [layoutMap, setLayoutMap] = useState<{[id: string]: number}>({});
+  const [rowCount, setRowCount] = useState<number>(4);
 
   // Hover state for inventory details
   const [hoveredCard, setHoveredCard] = useState<CardDef | null>(null);
@@ -358,6 +353,10 @@ const App = () => {
           setGameState(GameState.PAUSED);
       }
   };
+  
+  const handleAddRow = () => {
+      setRowCount(prev => prev + 1);
+  };
 
   return (
     <div className="app-container">
@@ -452,14 +451,18 @@ const App = () => {
 
               {/* Spell Board for Inventory Management */}
               {stats && (gameState === GameState.PAUSED || gameState === GameState.LEVEL_UP) && (
-                  <div className="w-full max-w-4xl bg-black/50 p-4 rounded-lg overflow-y-auto" style={{maxHeight: '60vh'}}>
+                  <div className="w-full max-w-4xl bg-black/50 p-4 rounded-lg overflow-y-auto flex flex-col items-center" style={{maxHeight: '60vh'}}>
                       <div className="mb-2 text-center text-white/70">拖拽调整法术施放顺序 (从左到右，从上到下)</div>
                       <SpellBoard 
                         ref={spellBoardRef}
                         items={stats.inventory}
                         layoutMap={layoutMap}
                         onHover={setHoveredCard}
+                        rowCount={rowCount}
                       />
+                      <button onClick={handleAddRow} className="mt-4 px-3 py-1 bg-gray-700 text-sm text-gray-300 rounded hover:bg-gray-600 border border-gray-500">
+                         + 添加法术组
+                      </button>
                   </div>
               )}
 

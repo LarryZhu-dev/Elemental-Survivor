@@ -66,15 +66,15 @@ export const ARTIFACT_CARDS: CardDef[] = [
   },
   // Blue Lightning
   { 
-    id: 'art_wedge', name: '雷公楔', description: '蓝色闪电 (与黄色闪电交叉引发雷暴)', 
-    type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#00ffff', 
-    artifactConfig: { cooldown: 45, baseDamage: 25, element: ElementType.LIGHTNING_BLUE, projectileType: 'lightning', color: 0x00ffff }
+    id: 'art_wedge', name: '雷公楔', description: '蓝色闪电 (与金色闪电交叉引发雷暴)', 
+    type: CardType.ARTIFACT, rarity: Rarity.GOLD, iconColor: '#2979ff', 
+    artifactConfig: { cooldown: 45, baseDamage: 25, element: ElementType.LIGHTNING_BLUE, projectileType: 'lightning', color: 0x2979ff }
   },
   // Yellow Lightning
   { 
-    id: 'art_mirror', name: '闪电神镜', description: '黄色闪电 (与蓝色闪电交叉引发雷暴)', 
-    type: CardType.ARTIFACT, rarity: Rarity.SILVER, iconColor: '#ffff00', 
-    artifactConfig: { cooldown: 45, baseDamage: 20, element: ElementType.LIGHTNING, projectileType: 'lightning', color: 0xffff00 }
+    id: 'art_mirror', name: '闪电神镜', description: '金色闪电 (与蓝色闪电交叉引发雷暴)', 
+    type: CardType.ARTIFACT, rarity: Rarity.SILVER, iconColor: '#ffd700', 
+    artifactConfig: { cooldown: 45, baseDamage: 20, element: ElementType.LIGHTNING, projectileType: 'lightning', color: 0xffd700 }
   },
 ];
 

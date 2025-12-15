@@ -967,23 +967,54 @@ export class GameEngine {
     }
 
     spawnLightningStorm(x: number, y: number, scale = 1.0) {
+        const radius = 120 * scale; // Reduced from 150
+        const duration = 40; // frames
+
         const g = new Graphics();
-        g.circle(0,0, 120 * scale).fill({color: 0xffffff, alpha: 0.9});
-        g.circle(0,0, 100 * scale).fill({color: 0x8800ff, alpha: 0.5});
         g.x = x; g.y = y;
         g.blendMode = 'add';
         this.world.addChild(g);
-        
+
         this.tempEffects.push({
             container: g,
-            life: 25,
-            onUpdate: (gfx, l) => { 
-                gfx.scale.set(1 + (25-l)*0.1); 
-                gfx.alpha = l/25; 
+            life: duration,
+            onUpdate: (gfx, l) => {
+                gfx.clear();
+                // Fade out
+                const alpha = l / duration;
+                
+                // Draw chaotic lightning
+                const count = 5 + Math.floor(Math.random() * 5);
+                for(let i=0; i<count; i++) {
+                    // Random bolts within circle
+                    const angle = Math.random() * Math.PI * 2;
+                    const r = Math.random() * radius;
+                    const sx = Math.cos(angle) * (r * 0.2); // Start near center
+                    const sy = Math.sin(angle) * (r * 0.2);
+                    const ex = Math.cos(angle) * r;
+                    const ey = Math.sin(angle) * r;
+                    
+                    // Jagged line function locally
+                    gfx.moveTo(sx, sy);
+                    const segments = 4;
+                    for(let j=1; j<segments; j++) {
+                        const t = j/segments;
+                        const jx = sx + (ex-sx)*t + (Math.random()-0.5)*20;
+                        const jy = sy + (ey-sy)*t + (Math.random()-0.5)*20;
+                        gfx.lineTo(jx, jy);
+                    }
+                    gfx.lineTo(ex, ey);
+                    
+                    const isGold = Math.random() > 0.5;
+                    const color = isGold ? 0xffd700 : 0x00bfff;
+                    gfx.stroke({ width: 2, color: color, alpha: alpha });
+                }
+                
+                // Outer glow
+                gfx.circle(0,0, radius).stroke({width: 1, color: 0xffffff, alpha: alpha * 0.2});
             }
         });
 
-        const radius = 150 * scale;
         this.enemies.forEach(e => {
             if (e.isDead || e.destroyed) return;
             const d = Math.hypot(e.x - x, e.y - y);
