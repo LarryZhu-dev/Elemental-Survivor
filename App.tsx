@@ -106,7 +106,7 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
         <div className="spell-board-container">
              {buckets.map((bucketItems, rowIndex) => (
                  <div key={rowIndex}>
-                     <div className="spell-row-label">符文序列 {rowIndex + 1}</div>
+                     <div className="spell-row-label">法术组 {rowIndex + 1}</div>
                      <div className="spell-row" ref={el => { rowRefs.current[rowIndex] = el; }}>
                         {bucketItems.map((card) => (
                             <div key={card.id} className="item" data-id={card.id}>
@@ -120,8 +120,7 @@ const SpellBoard = forwardRef((props: SpellBoardProps, ref) => {
                                      {card.type === CardType.BUFF && <div className="badge badge-buff">BF</div>}
                                      {card.type === CardType.ARTIFACT && <div className="badge badge-art">ART</div>}
                                      
-                                     {/* Just show icon/first letter, color handled by CSS classes now */}
-                                     <span>
+                                     <span style={{ color: card.iconColor, fontWeight: 'bold' }}>
                                          {card.name.substring(0,2)}
                                      </span>
                                 </div>
@@ -365,16 +364,16 @@ const App = () => {
       {/* --- MENU --- */}
       {gameState === GameState.MENU && (
         <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-6 z-50">
-          <h1 className="menu-title mb-8 text-6xl text-cyan-400 font-bold drop-shadow-md">ELEMENTAL SURVIVOR</h1>
+          <h1 className="menu-title mb-8">元素幸存者</h1>
           <div className="flex flex-col gap-4">
             <button 
               onClick={() => startGame(MapType.FIXED)}
-              className="btn btn-primary"
+              className="btn btn-fixed"
             >
               开始游戏
             </button>
           </div>
-          <div className="mt-8 text-center text-gray-400 text-sm">
+          <div className="instructions mt-8 text-center">
             点击地面或使用摇杆移动.<br/>
             按 [A] 键切换手动/自动瞄准.<br/>
             Esc/右上角按钮 暂停整理背包.<br/>
@@ -385,22 +384,17 @@ const App = () => {
       {/* --- HUD --- */}
       {(gameState === GameState.PLAYING || gameState === GameState.PRE_LEVEL_UP) && stats && (
         <>
-        <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute inset-0 pointer-events-none p-4">
            {/* Boss Warning */}
            {bossWarning && (
-             <div className="absolute top-24 left-1/2 transform -translate-x-1/2 text-red-500 font-bold text-3xl animate-pulse bg-black/50 px-4 py-2 border-y-2 border-red-600">
+             <div className="absolute top-20 left-1/2 transform -translate-x-1/2 text-red-500 font-bold text-3xl animate-pulse">
                {bossWarning}
              </div>
            )}
 
            {/* Aim Status */}
-           <div className="aim-status" onClick={() => {
-               if(engineRef.current) {
-                   engineRef.current.isAutoAim = !engineRef.current.isAutoAim;
-                   engineRef.current.onUpdateAimStatus(engineRef.current.isAutoAim);
-               }
-           }}>
-               瞄准模式: {aimStatus}
+           <div className="aim-status">
+               瞄准: {aimStatus} [A]
            </div>
 
            {/* HP Bar */}
@@ -429,7 +423,7 @@ const App = () => {
            <div className="wave-info">
              <div className="wave-title">WAVE {engineRef.current?.wave}</div>
              <div className="wave-timer">
-                ENEMIES: {engineRef.current?.waveTotalEnemies && engineRef.current.waveEnemiesSpawned !== undefined 
+                Left: {engineRef.current?.waveTotalEnemies && engineRef.current.waveEnemiesSpawned !== undefined 
                   ? Math.max(0, engineRef.current.waveTotalEnemies - engineRef.current.waveEnemiesSpawned + engineRef.current.enemies.length)
                   : 0}
              </div>
@@ -440,9 +434,10 @@ const App = () => {
         <Joystick onMove={handleJoystickMove} />
         
         <button className="pause-btn" onClick={handlePause}>
-             {/* Pause Icon SVG */}
-             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-                 <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+             {/* Simple SVG Pause Icon */}
+             <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                <rect x="6" y="4" width="4" height="16" />
+                <rect x="14" y="4" width="4" height="16" />
              </svg>
         </button>
         </>
@@ -450,45 +445,42 @@ const App = () => {
 
       {/* --- PAUSE / LEVEL UP / GAME OVER / VICTORY OVERLAYS --- */}
       {(gameState === GameState.PAUSED || gameState === GameState.LEVEL_UP || gameState === GameState.GAME_OVER || gameState === GameState.VICTORY) && (
-          <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-4 z-50 p-4">
-              <h2 className="text-4xl text-white font-bold tracking-widest mb-4">
-                  {gameState === GameState.PAUSED ? "PAUSED" : 
-                   gameState === GameState.LEVEL_UP ? "LEVEL UP" : 
-                   gameState === GameState.GAME_OVER ? "GAME OVER" : "VICTORY"}
+          <div className="absolute inset-0 overlay-bg flex flex-col items-center justify-center gap-4 z-50 p-8">
+              <h2 className="menu-title text-2xl">
+                  {gameState === GameState.PAUSED ? "已暂停" : 
+                   gameState === GameState.LEVEL_UP ? "升级!" : 
+                   gameState === GameState.GAME_OVER ? "游戏结束" : "胜利!"}
               </h2>
 
               {/* Spell Board for Inventory Management */}
               {stats && (gameState === GameState.PAUSED || gameState === GameState.LEVEL_UP) && (
-                  <div className="flex flex-col items-center w-full" style={{maxHeight: '65vh'}}>
-                      <div className="mb-2 text-center text-slate-400 text-sm">拖拽图标调整法术触发顺序 -></div>
-                      <div className="overflow-y-auto w-full flex flex-col items-center pb-4">
-                        <SpellBoard 
-                            ref={spellBoardRef}
-                            items={stats.inventory}
-                            layoutMap={layoutMap}
-                            onHover={setHoveredCard}
-                            rowCount={rowCount}
-                        />
-                        <button onClick={handleAddRow} className="btn-add-group max-w-2xl">
-                           + 添加符文槽位
-                        </button>
-                      </div>
+                  <div className="w-full max-w-4xl bg-black/50 p-4 rounded-lg overflow-y-auto flex flex-col items-center" style={{maxHeight: '60vh'}}>
+                      <div className="mb-2 text-center text-white/70">拖拽调整法术施放顺序 (从左到右，从上到下)</div>
+                      <SpellBoard 
+                        ref={spellBoardRef}
+                        items={stats.inventory}
+                        layoutMap={layoutMap}
+                        onHover={setHoveredCard}
+                        rowCount={rowCount}
+                      />
+                      <button onClick={handleAddRow} className="btn-add-group">
+                         + 添加法术组
+                      </button>
                   </div>
               )}
 
               {/* Hover Details (Fixed Position via CSS class) */}
               {hoveredCard && (
                   <div className="card-detail-tooltip">
-                      <div className="font-bold text-xl mb-1" style={{color: hoveredCard.iconColor}}>{hoveredCard.name}</div>
-                      <div className="text-xs uppercase text-slate-500 mb-2">{hoveredCard.type} - {hoveredCard.rarity}</div>
-                      <div className="text-sm text-slate-300 leading-relaxed">{hoveredCard.description}</div>
+                      <div className="font-bold text-lg" style={{color: hoveredCard.iconColor}}>{hoveredCard.name}</div>
+                      <div className="text-sm text-white/80">{hoveredCard.description}</div>
                   </div>
               )}
 
               {/* Actions */}
-              <div className="flex flex-wrap justify-center gap-4 mt-auto mb-8">
+              <div className="flex flex-wrap justify-center gap-4 mt-4">
                   {gameState === GameState.PAUSED && (
-                      <button className="btn btn-primary" onClick={handleResume}>RESUME</button>
+                      <button className="btn btn-primary" onClick={handleResume}>继续游戏</button>
                   )}
                   
                   {gameState === GameState.LEVEL_UP && levelUpOptions.map((card) => (
@@ -497,52 +489,49 @@ const App = () => {
                         onClick={() => selectCardForInventory(card)}
                         className={`card rarity-${card.rarity}`}
                       >
-                         <div className="card-inner">
-                            <div className="card-icon">
-                               <div style={{ color: card.iconColor }}>★</div>
-                            </div>
-                            <h3 className="card-name">{card.name}</h3>
-                            <p className="card-desc">{card.description}</p>
-                            <div className="card-type">{card.type}</div>
+                        <div className="card-icon">
+                           <div style={{ color: card.iconColor }}>★</div>
                         </div>
+                        <h3 className="card-name mb-2" style={{ color: card.iconColor }}>{card.name}</h3>
+                        <p className="card-desc">{card.description}</p>
+                        <div className="card-type">{card.type}</div>
                       </div>
                   ))}
 
                   {(gameState === GameState.GAME_OVER || gameState === GameState.VICTORY) && (
-                      <button className="btn btn-danger" onClick={() => window.location.reload()}>MAIN MENU</button>
+                      <button className="btn btn-danger" onClick={() => window.location.reload()}>返回主菜单</button>
                   )}
               </div>
               
               {/* GM Mode Tools */}
               {isGmMode && (
                   <div className="gm-panel">
-                      <div className="gm-header">
-                          <span>GM DEBUG TOOLS</span>
-                          <button className="gm-close" onClick={() => setIsGmMode(false)}>×</button>
+                      <div className="gm-header">GM TOOLS</div>
+                      <div className="gm-section">
+                        <div className="gm-label">Set Wave:</div>
+                        <input type="number" onChange={gmSetWave} className="text-black w-full"/>
                       </div>
-                      <div className="gm-content">
-                        <div className="gm-section-title">Game State</div>
-                        <div className="gm-grid">
-                            <div>Wave: <input type="number" onChange={gmSetWave} className="text-black w-16 px-1 rounded"/></div>
-                        </div>
-
-                        <div className="gm-section-title">Add Card</div>
-                        <div className="gm-grid">
-                            {ALL_CARDS.map(c => (
-                                <button key={c.id} onClick={() => selectCardForInventory(c)} className="gm-btn">
-                                    {c.name}
-                                </button>
-                            ))}
-                        </div>
-
-                        <div className="gm-section-title">Current Inventory</div>
-                        <div className="gm-grid">
-                            {stats?.inventory.map((c, i) => (
-                                <button key={i} onClick={() => gmRemoveCard(i)} className="gm-btn" style={{borderColor: '#ef4444'}}>
-                                    [X] {c.name}
-                                </button>
-                            ))}
-                        </div>
+                      
+                      <div className="gm-section">
+                          <div className="gm-label">Available Cards:</div>
+                          <div className="gm-card-grid">
+                              {ALL_CARDS.map(c => (
+                                  <button key={c.id} onClick={() => selectCardForInventory(c)} className="gm-card-btn">
+                                      {c.name}
+                                  </button>
+                              ))}
+                          </div>
+                      </div>
+                      
+                      <div className="gm-section">
+                          <div className="gm-label">Current Inventory:</div>
+                          <div className="gm-card-grid">
+                               {stats?.inventory.map((c, i) => (
+                                   <button key={i} onClick={() => gmRemoveCard(i)} className="gm-card-btn" style={{backgroundColor: '#7f1d1d', borderColor: '#ef4444'}}>
+                                       X {c.name}
+                                   </button>
+                               ))}
+                          </div>
                       </div>
                   </div>
               )}

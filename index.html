@@ -6,389 +6,649 @@
     <title>Elemental Survivor</title>
     <style>
       /* --- Base Reset & Defaults --- */
-      :root {
-        --c-silver: #e2e8f0;
-        --c-gold: #fbbf24;
-        --c-prism: #d946ef;
-        --c-bg-dark: #0f172a;
-        --c-panel: rgba(30, 41, 59, 0.95);
-      }
-      
       body {
         margin: 0;
         overflow: hidden;
-        background-color: #0f0f0f;
+        background-color: #1a1a1a;
+        /* Use system monospace for instant loading and pixel-art feel */
         font-family: 'Courier New', Courier, monospace; 
         user-select: none;
         color: white;
-        touch-action: none;
+        touch-action: none; /* Critical for mobile game controls */
       }
-      canvas { display: block; }
+      canvas {
+        display: block;
+      }
 
       /* --- Utilities --- */
       .absolute { position: absolute; }
+      .relative { position: relative; }
       .inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
       .w-full { width: 100%; }
+      .h-full { height: 100%; }
+      .h-screen { height: 100vh; }
       .flex { display: flex; }
       .flex-col { flex-direction: column; }
+      .flex-wrap { flex-wrap: wrap; }
       .items-center { align-items: center; }
       .justify-center { justify-content: center; }
       .justify-between { justify-content: space-between; }
+      .text-center { text-align: center; }
       .pointer-events-none { pointer-events: none; }
       .pointer-events-auto { pointer-events: auto; }
+      .z-40 { z-index: 40; }
       .z-50 { z-index: 50; }
+      .z-100 { z-index: 100; }
       .hidden { display: none; }
+      .block { display: block; }
       
-      /* --- App Container --- */
+      /* --- Components --- */
+
+      /* App Container */
       .app-container {
         position: relative;
         width: 100vw;
         height: 100vh;
         overflow: hidden;
-        background: radial-gradient(circle at center, #1e293b 0%, #000000 100%);
       }
 
-      /* --- Overlays --- */
+      /* Menus & Overlays */
       .overlay-bg {
-        background-color: rgba(0, 0, 0, 0.85);
-        backdrop-filter: blur(4px);
+        background-color: rgba(0, 0, 0, 0.8);
       }
+      .overlay-darker {
+        background-color: rgba(0, 0, 0, 0.95);
+      }
+      .gap-6 { gap: 1.5rem; }
+      .gap-4 { gap: 1rem; }
+      .gap-2 { gap: 0.5rem; }
+      .mb-8 { margin-bottom: 2rem; }
+      .mb-4 { margin-bottom: 1rem; }
+      .mb-2 { margin-bottom: 0.5rem; }
+      .mt-8 { margin-top: 2rem; }
+      .mt-4 { margin-top: 1rem; }
+      .mt-auto { margin-top: auto; }
+      .p-4 { padding: 1rem; }
+      .p-8 { padding: 2rem; }
 
-      /* --- HUD --- */
-      .bar-container {
-        position: absolute;
-        width: 18rem;
-        background-color: rgba(0,0,0,0.6);
-        border: 1px solid #475569;
-        border-radius: 4px;
-        overflow: hidden;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
-      }
-      .bar-hp { top: 1.5rem; left: 1.5rem; height: 1.5rem; }
-      .bar-xp { top: 3.5rem; left: 1.5rem; height: 0.5rem; border: none; }
-      
-      .bar-fill { height: 100%; transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
-      .fill-red { background: linear-gradient(90deg, #991b1b, #ef4444); }
-      .fill-yellow { background: linear-gradient(90deg, #ca8a04, #facc15); box-shadow: 0 0 10px #facc15; }
-      
-      .hp-text {
-        position: absolute; inset: 0;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 0.75rem; font-weight: 900; letter-spacing: 1px;
-        text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
-      }
-      
-      .lvl-text {
-        position: absolute; top: 3.2rem; left: 20rem;
-        color: #facc15; font-weight: bold; font-size: 1.5rem;
-        text-shadow: 0 0 10px rgba(250, 204, 21, 0.5);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      }
-
-      .aim-status {
-        position: absolute; top: 5rem; left: 1.5rem;
-        color: #67e8f9; font-size: 0.75rem;
-        border: 1px solid #0e7490; background: rgba(8, 51, 68, 0.8);
-        padding: 4px 12px; border-radius: 12px;
-        pointer-events: auto; letter-spacing: 1px;
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-      .aim-status:hover { background: #0e7490; }
-
-      .wave-info {
-        position: absolute; top: 1.5rem; right: 5rem;
-        text-align: right; pointer-events: none;
-      }
-      .wave-title {
-        font-size: 2rem; color: #f87171; font-weight: 900;
-        text-transform: uppercase; letter-spacing: 2px;
-        text-shadow: 4px 4px 0px rgba(0,0,0,0.5);
-      }
-      .wave-timer { font-size: 1rem; color: #94a3b8; font-family: monospace; }
-
-      /* --- Pause Button (Icon) --- */
-      .pause-btn {
-        position: absolute; top: 1.5rem; right: 1.5rem;
-        width: 3rem; height: 3rem;
-        background: rgba(30, 41, 59, 0.8);
-        border: 1px solid #475569;
-        border-radius: 8px;
-        color: white;
-        display: flex; align-items: center; justify-content: center;
-        cursor: pointer; z-index: 50; pointer-events: auto;
-        transition: all 0.2s;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-      }
-      .pause-btn:hover { background: #334155; transform: scale(1.05); border-color: white; }
-      .pause-btn svg { width: 1.5rem; height: 1.5rem; fill: currentColor; }
-
-      /* --- Joystick --- */
-      .joystick-container {
-        position: absolute; bottom: 60px; left: 60px;
-        width: 140px; height: 140px;
-        background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.1) 100%);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 50%;
-        touch-action: none; z-index: 40;
-        box-shadow: 0 0 20px rgba(0,0,0,0.3);
-      }
-      .joystick-knob {
-        position: absolute; top: 50%; left: 50%;
-        width: 50px; height: 50px;
-        background: radial-gradient(circle at 30% 30%, #ffffff, #94a3b8);
-        border-radius: 50%;
-        transform: translate(-50%, -50%);
-        pointer-events: none;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.5);
-      }
-
-      /* --- Cards (High Quality UI) --- */
-      .card {
-        width: 14rem; height: 20rem;
-        background-color: #1e293b;
-        position: relative;
-        display: flex; flex-direction: column;
-        padding: 4px; /* Inner spacing for border effect */
-        margin: 10px;
-        cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
-        border-radius: 8px;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-        overflow: hidden;
-      }
-      .card:hover { transform: translateY(-8px) scale(1.02); z-index: 10; }
-
-      /* Inner content container */
-      .card-inner {
-        background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-        flex: 1;
-        border-radius: 6px;
-        display: flex; flex-direction: column;
-        padding: 1rem;
-        z-index: 2;
-        position: relative;
-      }
-
-      /* Particle Border Animation */
-      .card::before {
-        content: "";
-        position: absolute;
-        top: -50%; left: -50%; width: 200%; height: 200%;
-        background: conic-gradient(transparent, transparent, transparent, var(--border-color));
-        animation: rotate 4s linear infinite;
-        z-index: 1;
-      }
-      .card::after {
-        content: "";
-        position: absolute;
-        top: -50%; left: -50%; width: 200%; height: 200%;
-        background: conic-gradient(transparent, transparent, transparent, var(--border-color));
-        animation: rotate 4s linear infinite;
-        animation-delay: -2s;
-        z-index: 1;
-      }
-      @keyframes rotate {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-
-      /* Rarity Variables */
-      .rarity-silver { --border-color: var(--c-silver); }
-      .rarity-gold { --border-color: var(--c-gold); }
-      .rarity-prismatic { --border-color: var(--c-prism); }
-
-      /* Specific Card Styles */
-      .rarity-gold .card-inner { background: linear-gradient(180deg, #181102 0%, #292008 100%); }
-      .rarity-prismatic .card-inner { background: linear-gradient(180deg, #1f0b21 0%, #2e1030 100%); }
-
-      .card-icon {
-        height: 7rem;
-        display: flex; align-items: center; justify-content: center;
-        font-size: 3rem;
-        background: rgba(0,0,0,0.3);
-        border-radius: 4px;
-        margin-bottom: 1rem;
-        border: 1px solid rgba(255,255,255,0.1);
-      }
-      .card-name {
-        font-size: 1.1rem;
+      /* Main Menu */
+      .menu-title {
+        font-size: 3.75rem; /* 6xl */
+        line-height: 1;
+        color: #22d3ee; /* cyan-400 */
+        text-shadow: 0 4px 0 rgba(0,0,0,1);
         font-weight: bold;
-        color: white; /* Always white */
-        margin-bottom: 0.5rem;
-        text-shadow: 0 2px 2px rgba(0,0,0,0.5);
+        text-align: center;
       }
-      .card-desc {
-        font-size: 0.8rem;
-        color: #94a3b8;
-        line-height: 1.4;
-        flex-grow: 1;
-      }
-      .card-type {
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        color: rgba(255,255,255,0.3);
-        text-align: right;
-        margin-top: 0.5rem;
-        letter-spacing: 1px;
-      }
-
-      /* --- Inventory (Spell Board) --- */
-      .spell-board-container {
-        width: 90vw; max-width: 800px;
-        background: rgba(15, 23, 42, 0.95);
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 1.5rem;
-        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
-      }
-      
-      .spell-row {
-        background: rgba(0,0,0,0.3);
-        border: 1px dashed #475569;
-        border-radius: 8px;
-        min-height: 90px;
-        margin-bottom: 1rem;
-        position: relative;
-        transition: background 0.2s;
-      }
-      .spell-row:hover { background: rgba(255,255,255,0.02); border-color: #64748b; }
-      
-      .spell-row-label {
-        font-size: 0.7rem; color: #64748b;
-        text-transform: uppercase; letter-spacing: 1px; font-weight: bold;
-        margin-bottom: 4px; margin-left: 4px;
-      }
-
-      .item {
-        position: absolute; width: 70px; height: 70px; margin: 5px;
-        z-index: 10; cursor: grab;
-      }
-      .item.muuri-item-dragging { z-index: 100 !important; }
-      .item.muuri-item-releasing { z-index: 99 !important; }
-
-      .item-content {
-        width: 100%; height: 100%;
-        background: #1e293b;
-        border: 2px solid #475569;
-        border-radius: 6px;
-        display: flex; align-items: center; justify-content: center;
-        font-weight: bold;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        position: relative;
-        overflow: hidden;
-      }
-      .item-content.rarity-silver { border-color: var(--c-silver); color: var(--c-silver); }
-      .item-content.rarity-gold { border-color: var(--c-gold); color: var(--c-gold); box-shadow: 0 0 10px rgba(251, 191, 36, 0.2); }
-      .item-content.rarity-prismatic { 
-        border: 2px solid transparent; 
-        background-image: linear-gradient(#1e293b, #1e293b), linear-gradient(135deg, #f0f, #0ff); 
-        background-origin: border-box; 
-        background-clip: content-box, border-box;
-        color: var(--c-prism);
-      }
-      
-      /* Badges */
-      .badge {
-        position: absolute; top: 0; right: 0;
-        font-size: 9px; padding: 1px 3px;
-        border-bottom-left-radius: 4px;
-        font-family: sans-serif;
-      }
-      .badge-effect { background: #a855f7; color: white; }
-      .badge-buff { background: #06b6d4; color: black; }
-      .badge-art { background: #f59e0b; color: black; }
-
-      /* --- Buttons --- */
       .btn {
-        padding: 0.75rem 2rem;
-        font-size: 1.25rem;
-        border: none;
-        background: linear-gradient(to bottom, #334155, #1e293b);
-        color: white;
-        font-family: inherit; font-weight: bold;
+        padding: 1rem 2rem;
+        font-size: 1.25rem; /* xl */
+        border-width: 4px;
         cursor: pointer;
-        border-radius: 4px;
-        box-shadow: 0 4px 0 #0f172a;
-        transition: transform 0.1s, box-shadow 0.1s;
-        text-transform: uppercase; letter-spacing: 1px;
+        background-color: #374151; /* gray-700 */
+        color: white;
+        transition: background-color 0.2s;
+        font-family: inherit;
+        font-weight: bold;
       }
-      .btn:active { transform: translateY(4px); box-shadow: 0 0 0 #0f172a; }
-      .btn:hover { background: linear-gradient(to bottom, #475569, #334155); }
-      
-      .btn-primary { background: linear-gradient(to bottom, #22c55e, #15803d); box-shadow: 0 4px 0 #14532d; }
-      .btn-primary:hover { background: linear-gradient(to bottom, #4ade80, #16a34a); }
-      
-      .btn-danger { background: linear-gradient(to bottom, #ef4444, #b91c1c); box-shadow: 0 4px 0 #7f1d1d; }
+      .btn:hover { background-color: #4b5563; /* gray-600 */ }
+      .btn-fixed { border-color: white; }
+      .btn-infinite { border-color: #a855f7; /* purple-500 */ }
+      .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.875rem; border-width: 2px; }
+      .btn-red { background-color: #991b1b; border-color: #ef4444; }
+      .btn-red:hover { background-color: #b91c1c; }
 
-      /* Add Group Button (Fancy) */
+      /* Add Spell Group Button */
       .btn-add-group {
         width: 100%;
         margin-top: 1rem;
         padding: 0.75rem;
-        background: rgba(30, 41, 59, 0.5);
+        background-color: #1e293b;
         border: 2px dashed #475569;
         color: #94a3b8;
-        border-radius: 8px;
-        cursor: pointer;
-        font-size: 0.9rem;
+        font-family: inherit;
         font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 1px;
+        cursor: pointer;
         transition: all 0.2s;
-        display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+        text-transform: uppercase;
+        font-size: 0.875rem;
       }
       .btn-add-group:hover {
-        background: rgba(30, 41, 59, 0.8);
+        background-color: #334155;
         border-color: #94a3b8;
         color: white;
-        box-shadow: 0 0 15px rgba(255,255,255,0.05);
+      }
+      
+      .instructions {
+        color: #9ca3af; /* gray-400 */
+        font-size: 0.875rem; /* sm */
+        max-width: 28rem;
+        line-height: 1.5;
       }
 
-      /* --- GM Panel (Fixed) --- */
-      .gm-panel {
-        position: fixed; /* Fixed to viewport */
-        top: 50%; left: 50%; transform: translate(-50%, -50%);
-        width: 800px; max-width: 95vw; height: 80vh;
-        background-color: rgba(15, 23, 42, 0.98);
-        border: 1px solid #a855f7;
-        box-shadow: 0 0 50px rgba(168, 85, 247, 0.2);
-        z-index: 9999;
-        display: flex; flex-direction: column;
-        padding: 2rem; border-radius: 12px;
+      /* HUD */
+      .bar-container {
+        position: absolute;
+        width: 16rem;
+        background-color: #1f2937; /* gray-800 */
+        border: 2px solid white;
+        max-width: 40vw; /* Responsive bar width */
+      }
+      .bar-hp { top: 1rem; left: 1rem; height: 1.5rem; }
+      .bar-xp { top: 3rem; left: 1rem; height: 1rem; }
+      .bar-fill {
+        height: 100%;
+        transition: width 0.3s;
+      }
+      .fill-red { background-color: #ef4444; }
+      .fill-yellow { background-color: #facc15; }
+      
+      .hp-text {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem; /* xs */
+        text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+        font-weight: bold;
+      }
+      
+      .lvl-text {
+        position: absolute;
+        top: 3rem;
+        left: 18rem; /* Adjusted for responsive */
+        color: #facc15; /* yellow-400 */
+        font-weight: bold;
+        font-size: 1.25rem; /* xl */
+      }
+      @media (max-width: 600px) {
+          .lvl-text { left: 45vw; font-size: 1rem; }
+      }
+
+      .aim-status {
+        position: absolute;
+        top: 5rem;
+        left: 1rem;
+        color: #a5f3fc;
+        font-size: 0.875rem;
+        border: 1px solid #0891b2;
+        background: rgba(0,0,0,0.5);
+        padding: 4px 8px;
+        pointer-events: auto; /* Allow clicking */
+      }
+
+      .wave-info {
+        position: absolute;
+        top: 1rem;
+        right: 4rem; /* Moved left to make room for pause button */
+        text-align: right;
+      }
+      .wave-title {
+        font-size: 1.5rem; /* 2xl */
+        color: #f87171; /* red-400 */
+        font-weight: bold;
+      }
+      .wave-timer {
+        font-size: 0.875rem; /* sm */
+        color: #9ca3af; /* gray-400 */
+      }
+
+      /* Mobile Controls */
+      .joystick-container {
+        position: absolute;
+        bottom: 50px;
+        left: 40px;
+        width: 120px;
+        height: 120px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        touch-action: none;
+        z-index: 50;
+      }
+      .joystick-knob {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 50px;
+        height: 50px;
+        background: rgba(255, 255, 255, 0.5);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      
+      .pause-btn {
+        position: absolute;
+        top: 1rem;
+        right: 1rem;
+        width: 2.5rem;
+        height: 2.5rem;
+        background: rgba(0,0,0,0.5);
+        border: 2px solid white;
+        border-radius: 8px;
         color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        z-index: 50;
+        pointer-events: auto;
+      }
+      .pause-btn:hover {
+        background-color: rgba(255,255,255,0.2);
+      }
+
+      /* Boss Warning */
+      .boss-overlay {
+        background-color: rgba(127, 29, 29, 0.3); /* red-900/30 */
+      }
+      .boss-text {
+        font-size: 3.75rem; /* 6xl */
+        color: #ef4444; /* red-500 */
+        font-weight: bold;
+        border-top: 4px solid #ef4444;
+        border-bottom: 4px solid #ef4444;
+        padding: 1rem 3rem;
+        background-color: rgba(0,0,0,0.5);
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        text-align: center;
+      }
+      @media (max-width: 600px) {
+          .boss-text { font-size: 2rem; padding: 1rem; }
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: .5; }
+      }
+
+      /* Level Up Card */
+      .levelup-title {
+        font-size: 2.25rem; /* 4xl */
+        color: #fde047; /* yellow-300 */
+        text-shadow: 0 0 10px rgba(253, 224, 71, 0.5);
+      }
+      
+      .card {
+        width: 14rem;
+        height: 19rem;
+        background-color: #1e293b; /* slate-800 */
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        cursor: pointer;
+        transition: transform 0.1s, box-shadow 0.2s;
+        position: relative;
+        box-sizing: border-box;
+        border-style: solid;
+        border-width: 6px;
+      }
+      @media (max-width: 800px) {
+          .card { width: 30vw; height: auto; min-height: 180px; padding: 0.5rem; }
+          .card-icon { height: 3rem; font-size: 1.5rem; margin-bottom: 0.5rem; }
+          .card-name { font-size: 0.8rem; }
+          .card-desc { font-size: 0.6rem; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+      }
+      
+      .card:hover { 
+        transform: scale(1.05) translateY(-5px); 
+      }
+
+      /* Card Rarity Styles */
+      /* Silver */
+      .rarity-silver {
+        border-color: #cbd5e1; /* slate-300 */
+        box-shadow: 0 0 15px rgba(203, 213, 225, 0.4);
+      }
+      .card.rarity-silver:hover {
+        box-shadow: 0 0 30px rgba(203, 213, 225, 0.9);
+      }
+      
+      /* Gold */
+      .rarity-gold {
+        border-color: #fbbf24; /* amber-400 */
+        box-shadow: 0 0 20px rgba(251, 191, 36, 0.5);
+      }
+      .card.rarity-gold:hover {
+        box-shadow: 0 0 40px rgba(251, 191, 36, 1);
+      }
+
+      /* Prismatic - Holographic Oil Slick Effect */
+      @keyframes holographic-shift {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 200% 50%; }
+      }
+      
+      .rarity-prismatic {
+        border-color: transparent; /* Hide actual border */
+        /* Use background to simulate border */
+        background: 
+            linear-gradient(#1e293b, #311b36) padding-box,
+            linear-gradient(135deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000) border-box;
+        background-size: 200% 200%;
+        animation: holographic-shift 3s linear infinite;
+        box-shadow: 0 0 20px rgba(217, 70, 239, 0.6);
+      }
+      
+      .card.rarity-prismatic:hover {
+         box-shadow: 0 0 40px rgba(217, 70, 239, 1), 0 0 10px rgba(255, 255, 255, 0.5) inset;
+      }
+
+      .card-icon {
+        height: 6rem;
+        width: 100%;
+        margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: rgba(0,0,0,0.3);
+        font-size: 2.25rem;
+      }
+      .card-name {
+        font-size: 1.125rem; /* lg */
+        font-weight: bold;
+        text-shadow: 1px 1px 0px black;
+      }
+      .card-desc {
+        font-size: 0.85rem; /* sm */
+        color: #d1d5db; /* gray-300 */
+        line-height: 1.4;
+      }
+      .card-type {
+        font-size: 0.75rem; /* xs */
+        text-transform: uppercase;
+        opacity: 0.5;
+        text-align: center;
+        margin-top: auto;
+      }
+
+      /* Inventory / Pause */
+      .pause-overlay {
+        background-color: rgba(0, 0, 0, 0.95);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 4rem 1rem;
+        overflow-y: auto; /* Enable vertical scroll for tall content */
+        -webkit-overflow-scrolling: touch; /* Smooth scroll on iOS */
+      }
+      .pause-title {
+        font-size: 2.25rem; /* 4xl */
+        color: white;
+        text-align: center;
+      }
+      .pause-desc {
+        font-size: 0.875rem; /* sm */
+        color: #9ca3af; /* gray-400 */
+        text-align: center;
+        max-width: 32rem; /* lg */
+      }
+      
+      .pause-layout {
+        display: flex;
+        gap: 2rem;
+        align-items: flex-start;
+        width: 100%;
+        max-width: 1000px;
+        justify-content: center;
+        flex-wrap: wrap; /* Allow wrapping */
+      }
+      @media (max-width: 800px) {
+          .pause-layout { flex-direction: column; align-items: center; gap: 1rem; }
+      }
+      
+      /* Muuri Grid Styles */
+      .spell-board-container {
+        width: 90vw;
+        max-width: 600px;
+        background: rgba(0,0,0,0.3);
+        border: 2px solid #333;
+        border-radius: 8px;
+        padding: 10px;
+        box-sizing: border-box;
+      }
+      
+      .spell-row-label {
+        font-size: 0.75rem;
+        color: #64748b;
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        font-weight: bold;
+      }
+
+      .spell-row {
+        width: 100%;
+        min-height: 90px; 
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        margin-bottom: 12px;
+        position: relative;
+        border: 1px dashed #444;
+      }
+
+      .grid {
+        position: relative;
+        width: 100%;
+      }
+      
+      .item {
+        display: block;
+        position: absolute;
+        width: 70px;
+        height: 70px;
+        margin: 8px;
+        z-index: 1;
+        cursor: grab;
+        touch-action: none; /* REQUIRED FOR MOBILE DRAG */
+      }
+      /* CRITICAL FIX FOR DRAGGING VISIBILITY */
+      .item.muuri-item-dragging {
+        z-index: 9999 !important;
+      }
+      .item.muuri-item-releasing {
+        z-index: 9998 !important;
+      }
+      
+      @media (max-width: 600px) {
+          .item { width: 60px; height: 60px; margin: 5px; }
+          .spell-row { min-height: 80px; }
+      }
+      
+      .item:active {
+        cursor: grabbing;
+      }
+
+      .item-content {
+        width: 100%;
+        height: 100%;
+        position: relative;
+        background-color: #334155;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        text-align: center;
+        box-sizing: border-box;
+        border: 2px solid #555;
+        box-shadow: 0 0 5px rgba(0,0,0,0.5);
+      }
+
+      /* Rarity Styles for Inventory Items */
+      .item-content.rarity-silver { border-color: #cbd5e1; box-shadow: 0 0 8px rgba(203, 213, 225, 0.3); }
+      .item-content.rarity-gold { border-color: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.3); }
+      .item-content.rarity-prismatic { 
+        border-color: transparent;
+        background: 
+            linear-gradient(#334155, #334155) padding-box,
+            linear-gradient(135deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000) border-box;
+        background-size: 200% 200%;
+        animation: holographic-shift 3s linear infinite;
+        box-shadow: 0 0 8px rgba(217, 70, 239, 0.4);
+      }
+
+      .badge {
+        position: absolute;
+        top: 0;
+        right: 0;
+        font-size: 8px;
+        padding: 0 0.25rem;
+      }
+      .badge-effect { background-color: #d946ef; color: white; font-weight: bold; }
+      .badge-buff { background-color: #22d3ee; /* cyan-200 */ color: black; font-weight: bold; }
+      .badge-art { background-color: #facc15; color: black; font-weight: bold; }
+
+      /* Details Panel */
+      .details-panel {
+        width: 16rem;
+        height: 24rem;
+        background-color: #1f2937;
+        border: 4px solid white;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        color: white;
+        flex-shrink: 0; /* Prevent shrinking when wrapped */
+      }
+      @media (max-width: 800px) {
+          .details-panel { width: 100%; height: auto; min-height: 150px; }
+      }
+      .details-title { font-size: 1.5rem; font-weight: bold; margin-bottom: 0.5rem; }
+      .details-type { color: #9ca3af; font-size: 0.875rem; margin-bottom: 1rem; text-transform: uppercase; }
+      .details-desc { font-size: 1rem; line-height: 1.4; color: #d1d5db; }
+
+      /* Tooltip Fixed Position to prevent layout shift */
+      .card-detail-tooltip {
+          position: fixed;
+          bottom: 2rem;
+          left: 50%;
+          transform: translateX(-50%);
+          background-color: #1f2937;
+          border: 2px solid white;
+          padding: 1rem;
+          border-radius: 8px;
+          z-index: 60;
+          pointer-events: none;
+          min-width: 300px;
+          text-align: center;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+      }
+      
+      /* Utilities reused */
+      .btn-resume {
+        padding: 0.5rem 2rem;
+        background-color: #16a34a; /* green-600 */
+        border: 2px solid #86efac; /* green-300 */
+        color: white;
+        font-size: 1rem;
+        cursor: pointer;
+        margin-top: 1rem;
+      }
+      .btn-resume:hover { background-color: #22c55e; /* green-500 */ }
+
+      /* Victory Screen */
+      .victory-overlay {
+        background-color: white;
+        color: black;
+      }
+      .victory-title {
+        font-size: 6rem; /* 8xl */
+        font-weight: bold;
+      }
+      .victory-subtitle {
+        font-size: 1.5rem; /* 2xl */
+      }
+      .cast-box {
+        background-color: #f3f4f6; /* gray-100 */
+        padding: 2rem;
+        border: 4px solid black;
+        text-align: center;
+      }
+      .cast-title {
+        font-size: 1.25rem; /* xl */
+        font-weight: bold;
+      }
+      .btn-replay {
+        text-decoration: underline;
+        background: none;
+        border: none;
+        font-size: 1rem;
+        cursor: pointer;
+        color: black;
+      }
+
+      /* GM Debug Panel */
+      .gm-panel {
+        position: fixed; /* Fixed to stay on screen even if scrolled */
+        top: 2rem;
+        left: 2rem;
+        width: 300px;
+        max-height: 80vh;
+        background-color: rgba(0, 0, 0, 0.95);
+        border: 2px solid #a855f7;
+        color: white;
+        padding: 1rem;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        box-shadow: 0 0 20px rgba(168, 85, 247, 0.5);
+        z-index: 200; /* Ensure it is above almost everything */
+      }
+      @media (max-width: 600px) {
+          .gm-panel { width: 90vw; left: 5vw; top: 1rem; }
       }
       .gm-header {
-        font-size: 1.5rem; color: #d8b4fe; font-weight: bold;
-        border-bottom: 1px solid #4c1d95; padding-bottom: 1rem; margin-bottom: 1rem;
-        display: flex; justify-content: space-between;
+        font-size: 1.25rem;
+        font-weight: bold;
+        color: #a855f7;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid #555;
+        padding-bottom: 0.5rem;
       }
-      .gm-content { flex: 1; overflow-y: auto; padding-right: 1rem; }
-      
-      .gm-section-title { color: #94a3b8; font-size: 0.8rem; text-transform: uppercase; margin: 1rem 0 0.5rem; }
-      .gm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem; }
-      
-      .gm-btn {
-        background: #334155; border: 1px solid #475569;
-        color: white; padding: 4px 8px; font-size: 0.75rem;
-        cursor: pointer; text-align: left; border-radius: 4px;
+      .gm-section {
+        margin-bottom: 1rem;
       }
-      .gm-btn:hover { background: #475569; border-color: white; }
-      .gm-close { background: transparent; border: none; color: #ef4444; font-size: 1.5rem; cursor: pointer; }
+      .gm-label {
+        font-size: 0.875rem;
+        color: #9ca3af;
+        margin-bottom: 0.5rem;
+      }
+      .gm-card-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+      .gm-card-btn {
+        background-color: #334155;
+        border: 1px solid #475569;
+        color: white;
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        cursor: pointer;
+        text-align: left;
+        width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .gm-card-btn:hover {
+        background-color: #475569;
+        border-color: white;
+      }
 
-      /* --- Animations --- */
-      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-      .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-
-      /* Tooltip */
-      .card-detail-tooltip {
-          position: fixed; bottom: 8rem; left: 50%; transform: translateX(-50%);
-          background: rgba(15, 23, 42, 0.95);
-          border: 1px solid #475569;
-          padding: 1.5rem; border-radius: 8px;
-          z-index: 200; min-width: 320px; text-align: center;
-          box-shadow: 0 10px 25px rgba(0,0,0,0.8);
-          pointer-events: none;
+      /* Custom Scrollbar for Inventory */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: #2d2d2d; 
+      }
+      ::-webkit-scrollbar-thumb {
+        background: #555; 
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: #777; 
       }
     </style>
   <script type="importmap">
