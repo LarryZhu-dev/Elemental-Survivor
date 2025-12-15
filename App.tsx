@@ -463,30 +463,32 @@ const App = () => {
                   </div>
               )}
 
-              {/* Hover Details */}
+              {/* Hover Details (Fixed Position via CSS class) */}
               {hoveredCard && (
-                  <div className="card-detail-tooltip p-4 border border-white/20 bg-slate-900 rounded-lg max-w-md pointer-events-none">
+                  <div className="card-detail-tooltip">
                       <div className="font-bold text-lg" style={{color: hoveredCard.iconColor}}>{hoveredCard.name}</div>
                       <div className="text-sm text-white/80">{hoveredCard.description}</div>
                   </div>
               )}
 
               {/* Actions */}
-              <div className="flex gap-4 mt-4">
+              <div className="flex flex-wrap justify-center gap-4 mt-4">
                   {gameState === GameState.PAUSED && (
                       <button className="btn btn-primary" onClick={handleResume}>继续游戏</button>
                   )}
                   
                   {gameState === GameState.LEVEL_UP && levelUpOptions.map((card) => (
-                      <div key={card.id} className="flex flex-col gap-2">
-                          <button 
-                            className="card-choice-btn p-4 border border-white/20 rounded hover:bg-white/10 flex flex-col items-center gap-2"
-                            onClick={() => selectCardForInventory(card)}
-                          >
-                              <div className="font-bold" style={{color: card.iconColor}}>{card.name}</div>
-                              <div className="text-xs">{card.description}</div>
-                              <div className={`badge rarity-${card.rarity}`}>{card.rarity}</div>
-                          </button>
+                      <div 
+                        key={card.id}
+                        onClick={() => selectCardForInventory(card)}
+                        className={`card rarity-${card.rarity}`}
+                      >
+                        <div className="card-icon">
+                           <div style={{ color: card.iconColor }}>★</div>
+                        </div>
+                        <h3 className="card-name mb-2" style={{ color: card.iconColor }}>{card.name}</h3>
+                        <p className="card-desc">{card.description}</p>
+                        <div className="card-type">{card.type}</div>
                       </div>
                   ))}
 

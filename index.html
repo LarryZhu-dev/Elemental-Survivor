@@ -494,6 +494,24 @@
       .details-type { color: #9ca3af; font-size: 0.875rem; margin-bottom: 1rem; text-transform: uppercase; }
       .details-desc { font-size: 1rem; line-height: 1.4; color: #d1d5db; }
 
+      /* Tooltip Fixed Position to prevent layout shift */
+      .card-detail-tooltip {
+          position: fixed;
+          bottom: 2rem;
+          left: 50%;
+          transform: translateX(-50%);
+          background-color: #1f2937;
+          border: 2px solid white;
+          padding: 1rem;
+          border-radius: 8px;
+          z-index: 60;
+          pointer-events: none;
+          min-width: 300px;
+          text-align: center;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.5);
+      }
+      
+      /* Utilities reused */
       .btn-resume {
         padding: 0.5rem 2rem;
         background-color: #16a34a; /* green-600 */
